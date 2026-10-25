@@ -1,0 +1,13 @@
+node_modules/
+bot.log
+bot.err.log
+test_out.log
+*.apk
+android/*.apk
+.gradle/
+build/
+app/build/
+*.iml
+.idea/
+local.properties
+.DS_Store

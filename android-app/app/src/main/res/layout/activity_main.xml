@@ -1,0 +1,314 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#202225"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- Header -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_marginEnd="8dp"
+            android:contentDescription="App Icon"
+            android:src="@drawable/ic_launcher" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="VC AFK 24/7"
+            android:textColor="#5865F2"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Status Card -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:background="#2F3136"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <TextView
+            android:id="@+id/textStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🔴 Status: Stopped"
+            android:textColor="#ED4245"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Scrollable Configuration -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="8dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- Inputs Card -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="#2F3136"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Account Token"
+                    android:textColor="#B9BBBE"
+                    android:textSize="12sp" />
+
+                <EditText
+                    android:id="@+id/editToken"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="#202225"
+                    android:hint="Paste User Token"
+                    android:inputType="textPassword"
+                    android:padding="10dp"
+                    android:textColor="#FFFFFF"
+                    android:textColorHint="#72767D"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Owner Discord ID"
+                    android:textColor="#B9BBBE"
+                    android:textSize="12sp" />
+
+                <EditText
+                    android:id="@+id/editOwnerId"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="#202225"
+                    android:hint="Your Discord User ID"
+                    android:inputType="number"
+                    android:padding="10dp"
+                    android:textColor="#FFFFFF"
+                    android:textColorHint="#72767D"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Target Voice Channel ID"
+                    android:textColor="#B9BBBE"
+                    android:textSize="12sp" />
+
+                <EditText
+                    android:id="@+id/editChannelId"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="#202225"
+                    android:hint="Target Voice Channel ID (e.g. 123456789)"
+                    android:inputType="number"
+                    android:padding="10dp"
+                    android:textColor="#FFFFFF"
+                    android:textColorHint="#72767D"
+                    android:textSize="13sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+
+                    <EditText
+                        android:id="@+id/editPrefix"
+                        android:layout_width="80dp"
+                        android:layout_height="wrap_content"
+                        android:background="#202225"
+                        android:hint="."
+                        android:padding="8dp"
+                        android:text="."
+                        android:textColor="#FFFFFF"
+                        android:textSize="14sp" />
+
+                    <CheckBox
+                        android:id="@+id/checkAutoDeaf"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:checked="true"
+                        android:text="Auto Deaf"
+                        android:textColor="#FFFFFF"
+                        android:textSize="12sp" />
+
+                    <CheckBox
+                        android:id="@+id/checkAutoMute"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:checked="false"
+                        android:text="Auto Mute"
+                        android:textColor="#FFFFFF"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+            </LinearLayout>
+
+            <!-- Big Start/Stop Button -->
+            <Button
+                android:id="@+id/btnStartStop"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:layout_marginTop="12dp"
+                android:background="#5865F2"
+                android:text="START 24/7 BOT (BACKGROUND)"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold" />
+
+            <!-- Voice Controls Grid -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnJoinVc"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="4dp"
+                    android:background="#3BA55D"
+                    android:text="JOIN VC"
+                    android:textColor="#FFFFFF" />
+
+                <Button
+                    android:id="@+id/btnLeaveVc"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_weight="1"
+                    android:layout_marginStart="4dp"
+                    android:background="#ED4245"
+                    android:text="LEAVE VC"
+                    android:textColor="#FFFFFF" />
+            </LinearLayout>
+
+            <!-- Toggles Row 1: Mute & Deafen -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnMute"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="4dp"
+                    android:background="#4F545C"
+                    android:text="MUTE"
+                    android:textColor="#FFFFFF" />
+
+                <Button
+                    android:id="@+id/btnDeaf"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_weight="1"
+                    android:layout_marginStart="4dp"
+                    android:background="#4F545C"
+                    android:text="DEAFEN"
+                    android:textColor="#FFFFFF" />
+            </LinearLayout>
+
+            <!-- Toggles Row 2: Camera & Screenshare -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnCamera"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="4dp"
+                    android:background="#4F545C"
+                    android:text="CAM ON"
+                    android:textColor="#FFFFFF" />
+
+                <Button
+                    android:id="@+id/btnStream"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_weight="1"
+                    android:layout_marginStart="4dp"
+                    android:background="#4F545C"
+                    android:text="SCREENSHARE"
+                    android:textColor="#FFFFFF" />
+            </LinearLayout>
+
+            <!-- Terminal Logs Card -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="180dp"
+                android:layout_marginTop="12dp"
+                android:background="#18191C"
+                android:orientation="vertical"
+                android:padding="8dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Live Console Logs"
+                        android:textColor="#B9BBBE"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/btnClearLogs"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Clear"
+                        android:textColor="#5865F2"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <ScrollView
+                    android:id="@+id/scrollLogs"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:layout_marginTop="4dp">
+
+                    <TextView
+                        android:id="@+id/textLogs"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="monospace"
+                        android:textColor="#DCDDDE"
+                        android:textSize="11sp" />
+                </ScrollView>
+            </LinearLayout>
+
+        </LinearLayout>
+    </ScrollView>
+
+</LinearLayout>

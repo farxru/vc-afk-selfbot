@@ -1,0 +1,9 @@
+{
+  "token": "",
+  "ownerId": "",
+  "prefix": ".",
+  "selfDeaf": true,
+  "selfMute": false,
+  "defaultStreamImage": "stream.png",
+  "dashboardPort": 3000
+}
