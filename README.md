@@ -6,10 +6,10 @@
   <p><b>Stay connected in Discord Voice Channels 24/7 directly from your Android phone or PC. Zero hosting fees, zero external servers, 100% client-side privacy.</b></p>
 
   <p>
-    <a href="https://github.com/farxru/vc-afk-selfbot/releases"><img src="https://img.shields.io/badge/Download-Android%20APK-5865F2?style=for-the-badge&logo=android&logoColor=white" alt="Download APK"></a>
+    <a href="https://github.com/farxru/vc-afk-selfbot/releases/download/latest/DiscordVCBot.apk"><img src="https://img.shields.io/badge/Direct%20Download-Android%20APK-5865F2?style=for-the-badge&logo=android&logoColor=white" alt="Direct Download APK"></a>
+    <a href="https://github.com/farxru/vc-afk-selfbot/releases/latest"><img src="https://img.shields.io/badge/GitHub-Releases-2F3136?style=for-the-badge&logo=github&logoColor=white" alt="GitHub Releases"></a>
     <img src="https://img.shields.io/badge/Hosting-0%24%20(Host%20On%20Phone)-3BA55D?style=for-the-badge&logo=googlecloud&logoColor=white" alt="Free Hosting">
     <img src="https://img.shields.io/badge/Privacy-100%25%20Client--Side-FAA61A?style=for-the-badge&logo=shield&logoColor=white" alt="Security Verified">
-    <img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="License">
   </p>
 </div>
 
@@ -40,11 +40,13 @@ Run the bot natively on your phone without needing your PC on.
 
 <div align="center">
   <img src="icon.png" width="120" height="120" alt="VC AFK App Icon" style="border-radius: 24px; box-shadow: 0 4px 20px rgba(88, 101, 242, 0.4); margin: 8px 0;">
+  <br>
+  <a href="https://github.com/farxru/vc-afk-selfbot/releases/download/latest/DiscordVCBot.apk"><b>👉 Click Here to Download DiscordVCBot.apk (Direct Download) 👈</b></a>
 </div>
 
 ### 1. Download & Install the APK
-* Go to the [**Releases Page**](https://github.com/farxru/vc-afk-selfbot/releases) and download **`DiscordVCBot.apk`**.
-* Tap the file to install *(allow "Install from Unknown Sources" if prompted)*.
+* Tap the [**Direct Download Link**](https://github.com/farxru/vc-afk-selfbot/releases/download/latest/DiscordVCBot.apk) (or download from [Releases](https://github.com/farxru/vc-afk-selfbot/releases/latest)).
+* Tap the downloaded `DiscordVCBot.apk` to install *(allow "Install from Unknown Sources" if prompted)*.
 * *Note: The APK is signed with an official release signature and passes Android security checks and Google Play Protect.*
 
 ### 2. Disable Android Battery Optimization (Important)
