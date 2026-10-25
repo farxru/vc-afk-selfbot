@@ -131,13 +131,20 @@ public class MainActivity extends AppCompatActivity implements DiscordGatewayCli
 
     private void checkAndBindService() {
         DiscordVoiceService running = DiscordVoiceService.getInstance();
-        if (running != null) {
+        if (running != null && running.isBotRunning()) {
             syncWithService(running);
             Intent serviceIntent = new Intent(this, DiscordVoiceService.class);
             bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE);
-        } else if (prefs.getBoolean("bot_started", false)) {
+        } else if (prefs.getBoolean("bot_started", false) && running != null && running.isBotRunning()) {
             Intent serviceIntent = new Intent(this, DiscordVoiceService.class);
             bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE);
+        } else {
+            isBotRunning = false;
+            isInVc = false;
+            btnStartStop.setText("START 24/7 BOT (BACKGROUND)");
+            btnStartStop.setBackgroundColor(0xFF5865F2);
+            textStatus.setText("🔴 Status: Stopped");
+            textStatus.setTextColor(0xFFED4245);
         }
     }
 
@@ -299,23 +306,35 @@ public class MainActivity extends AppCompatActivity implements DiscordGatewayCli
             appendLog("[+] Starting 24/7 Background Service...");
         } else {
             prefs.edit().putBoolean("bot_started", false).apply();
+            DiscordVoiceService svc = getActiveService();
+            if (svc != null) {
+                svc.stopBotCompletely();
+            }
+
             if (isBound) {
                 if (service != null) service.setUiListener(null);
                 try {
                     unbindService(serviceConnection);
                 } catch (Exception ignored) {}
                 isBound = false;
+                service = null;
             }
+
             Intent stopIntent = new Intent(this, DiscordVoiceService.class);
+            stopIntent.setAction(DiscordVoiceService.ACTION_STOP);
             stopService(stopIntent);
 
             isBotRunning = false;
             isInVc = false;
+            isCamOn = false;
+            isStreaming = false;
             btnStartStop.setText("START 24/7 BOT (BACKGROUND)");
             btnStartStop.setBackgroundColor(0xFF5865F2); // Discord Blurple
             textStatus.setText("🔴 Status: Stopped");
             textStatus.setTextColor(0xFFED4245);
-            appendLog("[-] 24/7 Service stopped.");
+            btnCamera.setText("CAM ON");
+            btnStream.setText("SCREENSHARE");
+            appendLog("[-] 24/7 Service completely turned off.");
         }
     }
 
@@ -417,16 +436,21 @@ public class MainActivity extends AppCompatActivity implements DiscordGatewayCli
     @Override
     public void onStatusChanged(String status, boolean connected) {
         runOnUiThread(() -> {
-            textStatus.setText("Status: " + status);
-            textStatus.setTextColor(connected ? 0xFF3BA55D : 0xFFFAA61A);
-            if (connected) {
-                isBotRunning = true;
-                btnStartStop.setText("STOP 24/7 BOT");
-                btnStartStop.setBackgroundColor(0xFFED4245);
-            } else if ("Stopped".equalsIgnoreCase(status)) {
+            if ("Stopped".equalsIgnoreCase(status) || (!isBotRunning && !connected)) {
                 isBotRunning = false;
+                isInVc = false;
+                textStatus.setText("🔴 Status: Stopped");
+                textStatus.setTextColor(0xFFED4245);
                 btnStartStop.setText("START 24/7 BOT (BACKGROUND)");
                 btnStartStop.setBackgroundColor(0xFF5865F2);
+            } else {
+                textStatus.setText("Status: " + status);
+                textStatus.setTextColor(connected ? 0xFF3BA55D : 0xFFFAA61A);
+                if (connected) {
+                    isBotRunning = true;
+                    btnStartStop.setText("STOP 24/7 BOT");
+                    btnStartStop.setBackgroundColor(0xFFED4245);
+                }
             }
         });
     }

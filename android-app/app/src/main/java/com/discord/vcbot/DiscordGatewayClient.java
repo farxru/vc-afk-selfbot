@@ -108,6 +108,11 @@ public class DiscordGatewayClient {
         this.targetChannelId = (targetChannelId != null && !targetChannelId.trim().isEmpty()) ? targetChannelId.trim() : null;
         this.isDeafened = autoDeaf;
         this.isMuted = autoMute;
+        this.isCameraOn = false;
+        this.isStreaming = false;
+        this.currentChannelId = null;
+        this.sequenceNumber = -1;
+        this.stayInVc = (this.targetChannelId != null);
         this.isRunning = true;
 
         log("[+] Connecting to Discord Gateway (v9)...");
@@ -129,13 +134,26 @@ public class DiscordGatewayClient {
         }
         if (webSocket != null) {
             try {
-                leaveVoiceChannel();
-                webSocket.close(1000, "Normal closure");
+                if (currentGuildId != null && !currentGuildId.isEmpty()) {
+                    sendVoiceStateUpdate(currentGuildId, null, false, false, false);
+                }
+                sendVoiceStateUpdate(null, null, false, false, false);
+                stopScreenShare();
+            } catch (Exception ignored) {}
+            try {
+                webSocket.close(1000, "Bot stopped by user");
             } catch (Exception ignored) {}
             webSocket = null;
         }
+        currentChannelId = null;
+        currentGuildId = null;
+        targetChannelId = null;
+        sequenceNumber = -1;
+        isCameraOn = false;
+        isStreaming = false;
+        notifyVoiceState(null, false, isMuted, isDeafened, false, false);
         notifyStatus("Stopped", false);
-        log("[-] Gateway connection closed.");
+        log("[-] Bot completely turned off.");
     }
 
     private void connect() {
@@ -176,15 +194,23 @@ public class DiscordGatewayClient {
             @Override
             public void onClosed(WebSocket ws, int code, String reason) {
                 log("[-] Gateway closed: " + code + " / " + reason);
-                notifyStatus("Disconnected", false);
-                scheduleReconnect(2000);
+                if (isRunning) {
+                    notifyStatus("Disconnected", false);
+                    scheduleReconnect(2000);
+                } else {
+                    notifyStatus("Stopped", false);
+                }
             }
 
             @Override
             public void onFailure(WebSocket ws, Throwable t, Response response) {
                 log("[!] Gateway connection error: " + (t != null ? t.getMessage() : "Unknown error"));
-                notifyStatus("Network Error", false);
-                scheduleReconnect(2500);
+                if (isRunning) {
+                    notifyStatus("Network Error", false);
+                    scheduleReconnect(2500);
+                } else {
+                    notifyStatus("Stopped", false);
+                }
             }
         });
     }
@@ -492,9 +518,11 @@ public class DiscordGatewayClient {
         stopScreenShare();
         isCameraOn = false;
         log("[-] Leaving Voice Channel: " + currentChannelId);
-        sendVoiceStateUpdate(currentGuildId, null, false, false, false);
+        if (currentGuildId != null && !currentGuildId.isEmpty()) {
+            sendVoiceStateUpdate(currentGuildId, null, false, false, false);
+        }
+        sendVoiceStateUpdate(null, null, false, false, false);
         currentChannelId = null;
-        targetChannelId = null;
         notifyVoiceState(null, false, isMuted, isDeafened, false, false);
     }
 

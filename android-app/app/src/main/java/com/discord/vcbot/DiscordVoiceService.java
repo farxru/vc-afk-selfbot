@@ -124,17 +124,62 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
         return isStreaming;
     }
 
+    public void stopBotCompletely() {
+        currentStatus = "Stopped";
+        isConnected = false;
+        isInVc = false;
+        currentChannel = "None";
+
+        if (client != null) {
+            client.stop();
+        }
+
+        if (uiListener != null) {
+            uiListener.onStatusChanged("Stopped", false);
+            uiListener.onVoiceStateChanged("None", false, false, false, false, false);
+        }
+
+        if (wakeLock != null && wakeLock.isHeld()) {
+            try {
+                wakeLock.release();
+            } catch (Exception ignored) {}
+        }
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE);
+            } else {
+                stopForeground(true);
+            }
+            if (notificationManager != null) {
+                notificationManager.cancel(NOTIFICATION_ID);
+            }
+        } catch (Exception ignored) {}
+
+        try {
+            getSharedPreferences("discord_vc_bot_prefs", MODE_PRIVATE)
+                    .edit()
+                    .putBoolean("bot_started", false)
+                    .apply();
+        } catch (Exception ignored) {}
+
+        stopSelf();
+        instance = null;
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && intent.getAction() != null) {
             String action = intent.getAction();
             if (ACTION_STOP.equals(action)) {
-                stopSelf();
+                stopBotCompletely();
                 return START_NOT_STICKY;
             } else if (ACTION_MUTE_TOGGLE.equals(action)) {
                 if (client != null) client.setMute(!isMuted);
+                return START_STICKY;
             } else if (ACTION_DEAF_TOGGLE.equals(action)) {
                 if (client != null) client.setDeafen(!isDeafened);
+                return START_STICKY;
             } else if (ACTION_START.equals(action)) {
                 String token = intent.getStringExtra("token");
                 String ownerId = intent.getStringExtra("ownerId");
@@ -142,9 +187,20 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
                 String channelId = intent.getStringExtra("channelId");
                 boolean autoDeaf = intent.getBooleanExtra("autoDeaf", true);
                 boolean autoMute = intent.getBooleanExtra("autoMute", false);
-                if (client != null) {
-                    client.start(token, ownerId, prefix, channelId, autoDeaf, autoMute);
+
+                if (wakeLock != null && !wakeLock.isHeld()) {
+                    try {
+                        wakeLock.acquire(24 * 60 * 60 * 1000L);
+                    } catch (Exception ignored) {}
                 }
+
+                if (client == null) {
+                    client = new DiscordGatewayClient(this);
+                }
+
+                startForeground(NOTIFICATION_ID, buildNotification("Discord VC Bot 24/7", "Starting service..."));
+                client.start(token, ownerId, prefix, channelId, autoDeaf, autoMute);
+                return START_STICKY;
             }
         }
 
@@ -227,8 +283,10 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
     public void onStatusChanged(String status, boolean connected) {
         this.currentStatus = status;
         this.isConnected = connected;
-        String content = isInVc ? ("In VC: " + currentChannel) : (connected ? "Connected to Gateway" : "24/7 service active");
-        updateNotification("Discord VC Bot: " + status, content);
+        if (!"Stopped".equals(status)) {
+            String content = isInVc ? ("In VC: " + currentChannel) : (connected ? "Connected to Gateway" : "24/7 service active");
+            updateNotification("Discord VC Bot: " + status, content);
+        }
         if (uiListener != null) {
             uiListener.onStatusChanged(status, connected);
         }
@@ -261,18 +319,7 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
 
     @Override
     public void onDestroy() {
-        if (client != null) {
-            client.stop();
-        }
-        if (wakeLock != null && wakeLock.isHeld()) {
-            wakeLock.release();
-        }
-        if (uiListener != null) {
-            uiListener.onStatusChanged("Stopped", false);
-        }
-        if (instance == this) {
-            instance = null;
-        }
+        stopBotCompletely();
         uiListener = null;
         super.onDestroy();
     }

@@ -770,14 +770,22 @@ try {
   console.error('[!] Failed to launch mobile web dashboard:', err.message);
 }
 
-// Start Client
-function startLogin() {
-  client.login(config.token).catch((err) => {
-    console.error('[!] Failed to login with provided token:', err.message);
-    console.log('[!] Retrying login in 10 seconds...');
-    setTimeout(startLogin, 10000);
-  });
+// Graceful shutdown handling to leave VC cleanly
+async function gracefulShutdown(signal) {
+  console.log(`\n[-] Received ${signal}. Disconnecting from voice channels...`);
+  stayInVc = false;
+  try {
+    await leaveVoiceChannel();
+  } catch (_) {}
+  try {
+    client.destroy();
+  } catch (_) {}
+  console.log('[-] Bot stopped completely.');
+  process.exit(0);
 }
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 startLogin();
 
