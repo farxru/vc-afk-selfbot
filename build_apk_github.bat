@@ -1,8 +1,8 @@
 @echo off
-:: Discord VC Bot - 1-Click Cloud APK Builder via GitHub Actions
+:: VC AFK 24/7 Selfbot - Automated Cloud APK Builder via GitHub Actions
 cd /d "%~dp0"
 echo ==========================================================
-echo    VC AFK 24/7 Selfbot - 1-Click Cloud APK Builder
+echo    VC AFK 24/7 Selfbot - Automated Cloud APK Builder
 echo ==========================================================
 echo.
 
@@ -13,7 +13,7 @@ git config --global http.schannelCheckRevoke false >nul 2>nul
 :: Check git
 where git >nul 2>nul
 if %ERRORLEVEL% neq 0 (
-    echo [ERROR] Git is not installed on this PC!
+    echo [ERROR] Git is not installed or not in PATH!
     echo Please install Git from https://git-scm.com/
     pause
     exit /b 1
@@ -28,41 +28,40 @@ if not exist ".git" (
 :: Configure remote origin cleanly
 git remote get-url origin >nul 2>nul
 if %ERRORLEVEL% equ 0 (
-    echo [+] Connected to repository:
+    echo [+] Target repository:
     git remote get-url origin
 ) else (
     echo.
-    echo [!] No GitHub repository connected yet.
-    set /p REPO_URL="Paste your GitHub repository URL (default: https://github.com/farxru/vc-afk-selfbot.git): "
+    echo [!] No remote origin configured.
+    set /p REPO_URL="Enter GitHub repository URL (default: https://github.com/farxru/vc-afk-selfbot.git): "
     if "%REPO_URL%"=="" set REPO_URL=https://github.com/farxru/vc-afk-selfbot.git
     git remote add origin %REPO_URL%
 )
 
 echo.
-echo [+] Adding any modified files...
+echo [+] Staging and committing changes...
 git add .
-git commit -m "Release: VC AFK 24/7 Selfbot (Android + Node.js)" >nul 2>nul
+git commit -m "build: trigger automated release compilation" >nul 2>nul
 
 echo.
-echo [+] Pushing to GitHub (origin/main)...
+echo [+] Pushing commit to GitHub (origin/main)...
 git branch -M main
 git push -u origin main
 
 if %ERRORLEVEL% equ 0 (
     echo.
     echo ==========================================================
-    echo [SUCCESS] Code is synced with GitHub!
+    echo [SUCCESS] Source code synchronized successfully!
     echo ==========================================================
     echo.
-    echo Next step to get your APK:
-    echo 1. Open your repository: https://github.com/farxru/vc-afk-selfbot/actions
-    echo 2. Check the "Actions" tab.
-    echo 3. When "Build Discord VC Bot APK" finishes,
-    echo    download "DiscordVCBot-APK" (.apk) directly to your phone!
+    echo The GitHub Actions cloud runner is compiling your APK:
+    echo 1. Open Actions: https://github.com/farxru/vc-afk-selfbot/actions
+    echo 2. When the build completes (~60s), your signed release is ready:
+    echo    Direct Download: https://github.com/farxru/vc-afk-selfbot/releases/latest
     echo.
 ) else (
     echo.
-    echo [!] Push failed. Please check your GitHub token or network connection.
+    echo [!] Push failed. Verify your network connection and GitHub credentials.
 )
 
 pause

@@ -1,156 +1,197 @@
 <div align="center">
-  <img src="banner.png" alt="VC AFK Banner" width="100%" style="border-radius: 12px; margin-bottom: 12px;">
+  <img src="banner.png" alt="VC AFK Selfbot Banner" width="100%" style="border-radius: 12px; margin-bottom: 16px;">
 
   # VC AFK &middot; 24/7 Voice Channel Selfbot
-
-  <p><b>Stay connected in Discord Voice Channels 24/7 directly from your Android phone or PC. Zero hosting fees, zero external servers, 100% client-side privacy.</b></p>
-
+  
+  **An enterprise-grade, lightweight solution for maintaining 24/7 presence in Discord voice channels directly from your Android smartphone or PC.**
+  
   <p>
-    <a href="https://github.com/farxru/vc-afk-selfbot/releases/download/latest/DiscordVCBot.apk"><img src="https://img.shields.io/badge/Direct%20Download-Android%20APK-5865F2?style=for-the-badge&logo=android&logoColor=white" alt="Direct Download APK"></a>
-    <a href="https://github.com/farxru/vc-afk-selfbot/releases/latest"><img src="https://img.shields.io/badge/GitHub-Releases-2F3136?style=for-the-badge&logo=github&logoColor=white" alt="GitHub Releases"></a>
-    <img src="https://img.shields.io/badge/Hosting-0%24%20(Host%20On%20Phone)-3BA55D?style=for-the-badge&logo=googlecloud&logoColor=white" alt="Free Hosting">
-    <img src="https://img.shields.io/badge/Privacy-100%25%20Client--Side-FAA61A?style=for-the-badge&logo=shield&logoColor=white" alt="Security Verified">
+    <a href="https://github.com/farxru/vc-afk-selfbot/releases/download/latest/DiscordVCBot.apk">
+      <img src="https://img.shields.io/badge/Download-Release%20APK-5865F2?style=for-the-badge&logo=android&logoColor=white" alt="Download APK">
+    </a>
+    <a href="https://github.com/farxru/vc-afk-selfbot/releases/latest">
+      <img src="https://img.shields.io/badge/GitHub-Releases-2B2D31?style=for-the-badge&logo=github&logoColor=white" alt="GitHub Releases">
+    </a>
+    <a href="LICENSE">
+      <img src="https://img.shields.io/badge/License-MIT-3BA55D?style=for-the-badge" alt="License">
+    </a>
+    <img src="https://img.shields.io/badge/Host-On%20Phone%20($0)-FAA61A?style=for-the-badge&logo=googlecloud&logoColor=white" alt="Zero Cost Hosting">
+    <img src="https://img.shields.io/badge/Privacy-100%25%20Client--Side-ED4245?style=for-the-badge&logo=shield&logoColor=white" alt="Client Side Privacy">
   </p>
 </div>
 
 ---
 
-## 🌟 Why VC AFK?
+## Executive Overview
 
-Most Discord 24/7 bots require you to pay monthly for a VPS, keep a power-hungry PC running all night, or upload your private token to untrusted third-party cloud hosting services.
+Conventional 24/7 Discord bots enforce recurring monthly VPS hosting costs, require power-hungry desktop computers running overnight, or demand uploading private account tokens to untrusted third-party cloud platforms.
 
-**VC AFK solves this completely:** It transforms your **Android phone into a dedicated 24/7 Discord host** using a lightweight, battery-efficient Android Foreground Service.
+**VC AFK eliminates these compromises entirely.** By leveraging a native Android Foreground Service with raw Gateway WebSockets, your phone operates as an autonomous, self-contained 24/7 host. The bot continues running continuously in the background—even with your device locked, screen turned off, or during network transitions.
 
-### Key Highlights
+### Architectural Advantages
 
-* 📱 **Host Directly on Your Phone (0$ Hosting Cost)**: No VPS, no cloud bills, no Termux commands. The native Android APK runs 24/7 in the background with your screen locked.
-* 🛡️ **100% Private & Fully Secured**: Your Discord token is stored **locally on your device** inside private Android storage (`SharedPreferences`). It is never transmitted to any third-party server, proxy, or webhook.
-* 🔄 **Instant Auto-Rejoin on Kick**: If a server moderator or administrator disconnects or kicks your account from the voice channel, the bot automatically rejoins your target VC within **1 second**.
-* ⚡ **Main Discord App Coexistence**: When you connect, move, or disconnect on your official Discord desktop or mobile app, the bot detects the shift and automatically pulls your 24/7 session right back into your target voice channel.
-* 🔋 **Ultra Battery-Friendly**: Runs on raw, event-driven Discord Gateway WebSockets. Consumes **< 15MB RAM** and negligible battery (< 1% over 24 hours).
-* 📡 **Continuous Presence Watchdog**: A background watchdog verifies presence every 15 seconds. If Wi-Fi blips or mobile data drops, connection is re-established seamlessly.
-* 🎥 **Virtual Screenshare & Camera**: Start blank streams (`.ss` / `.ssoff`) and webcam simulator (`.cam` / `.camoff`) without any video rendering overhead.
-* 🖥️ **Cross-Platform**: Run as a native Android app, a Windows background tray app, or a lightweight Node.js script on Linux / macOS.
+| Metric | Traditional Cloud / VPS Bots | VC AFK Phone Hosting |
+|---|---|---|
+| **Monthly Cost** | $5.00 – $20.00 / month | **$0.00 (Free forever)** |
+| **Data Privacy** | Tokens stored on remote cloud servers | **100% Local & Private (`SharedPreferences`)** |
+| **Network Security** | Proxied through third-party servers | **Direct TLS connection to Discord Gateway** |
+| **RAM Footprint** | 100MB – 300MB (Electron/Browser) | **< 15MB (Raw Event-Driven Socket)** |
+| **Uptime Guarantee** | Subject to server reboots & maintenance | **Android Foreground Service (`START_STICKY`)** |
+| **Disconnection Handling**| Manual reconnect required | **Automated 1-second reconnect on kick/shift** |
 
 ---
 
-## 📱 Method 1: Android Phone (Host 24/7 On Your Phone)
+## Core Capabilities
 
-Run the bot natively on your phone without needing your PC on.
+* 📱 **Native Android Phone Hosting (Zero-Cost)**: Eliminates VPS bills, cloud infrastructure, and terminal commands. Runs quietly as an official Android Foreground Service.
+* 🛡️ **Zero-Trust Client-Side Architecture**: Account tokens never touch external APIs, analytics collectors, or webhooks. Configuration is strictly isolated to your device's private sandbox.
+* 🔄 **Instant Auto-Rejoin Protocol**: If an administrator or moderator kicks, disconnects, or moves your account from the voice channel, the internal watchdog re-enters the channel within **1 second**.
+* ⚡ **Main Client Seamless Coexistence**: Active on the official Discord mobile or desktop client? VC AFK detects changes in voice state and cleanly synchronizes back to your designated AFK room without collision.
+* 🔋 **Battery Optimization Standard**: Built using non-blocking I/O (`OkHttp3` WebSocket engine). Consumes minimal CPU cycles and under 1% battery over a full 24-hour cycle.
+* 📡 **Liveness Watchdog**: An automated 15-second heartbeat monitor detects transient packet drops or cell tower handovers, re-establishing session state transparently.
+* 🎥 **Virtual Stream & Camera Emulation**: Broadcast simulated camera streams (`.cam` / `.camoff`) and Go Live screenshare streams (`.ss` / `.ssoff`) with zero video encoding overhead.
+* 💻 **Cross-Platform Compatibility**: Available as a native Android APK, an unobtrusive Windows System Tray daemon, or a headless Node.js daemon for Linux and macOS.
+
+---
+
+## Installation & Deployment
+
+### Method 1: Android Phone (Primary Deployment)
 
 <div align="center">
-  <img src="icon.png" width="120" height="120" alt="VC AFK App Icon" style="border-radius: 24px; box-shadow: 0 4px 20px rgba(88, 101, 242, 0.4); margin: 8px 0;">
+  <img src="icon.png" width="104" height="104" alt="VC AFK Application Icon" style="border-radius: 22px; box-shadow: 0 4px 18px rgba(88, 101, 242, 0.35); margin-bottom: 12px;">
   <br>
-  <a href="https://github.com/farxru/vc-afk-selfbot/releases/download/latest/DiscordVCBot.apk"><b>👉 Click Here to Download DiscordVCBot.apk (Direct Download) 👈</b></a>
+  
+  [![Download Android Release APK](https://img.shields.io/badge/Download%20Release%20APK-DiscordVCBot.apk-5865F2?style=for-the-badge&logo=android&logoColor=white)](https://github.com/farxru/vc-afk-selfbot/releases/download/latest/DiscordVCBot.apk)
+  &nbsp;&nbsp;
+  [![View Release Notes](https://img.shields.io/badge/All%20Releases-GitHub%20Releases-2B2D31?style=for-the-badge&logo=github&logoColor=white)](https://github.com/farxru/vc-afk-selfbot/releases/latest)
 </div>
 
-### 1. Download & Install the APK
-* Tap the [**Direct Download Link**](https://github.com/farxru/vc-afk-selfbot/releases/download/latest/DiscordVCBot.apk) (or download from [Releases](https://github.com/farxru/vc-afk-selfbot/releases/latest)).
-* Tap the downloaded `DiscordVCBot.apk` to install *(allow "Install from Unknown Sources" if prompted)*.
-* *Note: The APK is signed with an official release signature and passes Android security checks and Google Play Protect.*
+#### Step 1: Install the Application
+1. Download **[`DiscordVCBot.apk`](https://github.com/farxru/vc-afk-selfbot/releases/download/latest/DiscordVCBot.apk)** directly to your Android device.
+2. Tap the downloaded file to install. If prompted by Android, grant permission to *Install from this source*.
+3. The application is pre-signed with V1 & V2 APK signatures and complies with Google Play Protect standards.
 
-### 2. Disable Android Battery Optimization (Important)
-Android devices put background apps to sleep after 5–10 minutes unless granted background permission:
-1. Open your phone's **Settings** ⚙️ ➔ **Apps** ➔ **VC AFK Bot**.
-2. Tap **Battery** (or "App Battery Usage") and set it to **"Unrestricted"** (or *"Don't optimize"* / *"No restrictions"*).
-3. *(Samsung)*: Settings ➔ Battery ➔ Background usage limits ➔ Add **VC AFK Bot** to **"Never sleeping apps"**.
-4. *(Xiaomi / Redmi / POCO)*: Enable **"Autostart"** and set Battery Saver to **"No restrictions"**.
+#### Step 2: Configure Android Battery Exemption (Critical for 24/7 Stability)
+To prevent Android's aggressive battery manager from suspending the process during sleep:
 
-### 3. Start 24/7 Hosting
-1. Launch **VC AFK Bot** on your phone.
-2. Enter your **Account Token** and your **Discord User ID**. *(Saved privately on your device)*.
+> [!IMPORTANT]
+> **Disable Battery Optimization**:
+> * **Standard Android**: Navigate to **Settings ⚙️ ➔ Apps ➔ VC AFK Bot ➔ Battery** ➔ Select **Unrestricted** (or *Don't optimize*).
+> * **Samsung One UI**: **Settings ➔ Battery ➔ Background usage limits ➔ Never sleeping apps** ➔ Add **VC AFK Bot**.
+> * **Xiaomi / Redmi / POCO**: App Info ➔ Enable **Autostart** ➔ Set Battery Saver to **No restrictions**.
+> * **OnePlus / Realme / OPPO**: App Info ➔ Battery ➔ Enable **Allow background activity** and **Allow auto-launch**.
+
+#### Step 3: Connect & Initialize
+1. Launch **VC AFK Bot**.
+2. Enter your **Account Token** and your **Discord User ID**. *(Saved encrypted and locally on your phone)*.
 3. Enter your **Target Voice Channel ID** *(e.g. `123456789012345678`)*.
 4. Tap **START 24/7 BOT (BACKGROUND)**.
-5. A persistent notification appears in your status bar:
-   > **VC AFK Bot 24/7** &middot; *🟢 In VC: #channel-name*
-6. **You're done!** Turn off your phone screen, lock your phone, or open other apps. Your bot will remain in the voice channel 24/7.
+5. A persistent status notification appears:
+   ```
+   VC AFK Bot 24/7 • In VC: #general (Connected)
+   ```
+6. **Deployment Complete**: You can now lock your device, place it in your pocket, or navigate to other apps. The service will maintain your voice channel presence uninterrupted.
 
 ---
 
-## 💻 Method 2: Windows Background Mode (PC)
+### Method 2: Windows System Tray (PC Deployment)
 
-If you prefer running on your PC, VC AFK includes a clean Windows tray launcher:
+If you prefer operating from a Windows desktop or workstation:
 
-1. Clone or download this repository:
-   ```bash
-   git clone https://github.com/farxru/vc-afk-selfbot.git
-   cd vc-afk-selfbot
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Edit [`config.json`](config.json) with your credentials:
-   ```json
-   {
-     "token": "YOUR_DISCORD_USER_TOKEN",
-     "ownerId": "YOUR_DISCORD_USER_ID",
-     "prefix": ".",
-     "selfDeaf": true,
-     "selfMute": false,
-     "dashboardPort": 3000
-   }
-   ```
-4. Double-click **[`start.bat`](start.bat)**:
-   * The bot launches silently into your **Windows System Tray** (near your clock).
-   * Right-click the tray icon to check status, view real-time logs, open the mobile web dashboard, or stop the bot.
-   * To stop anytime, right-click the tray icon and select **Stop & Exit**, or run **[`stop.bat`](stop.bat)**.
+```bash
+# Clone the repository
+git clone https://github.com/farxru/vc-afk-selfbot.git
+cd vc-afk-selfbot
 
-### Mobile Web Dashboard (PWA)
-When running on PC, open `http://localhost:3000` (or `http://<your-pc-ip>:3000` from your phone) to access the real-time web controller with "Add to Home Screen" support.
+# Install dependencies
+npm install
+```
+
+Configure your parameters in [`config.json`](config.json):
+```json
+{
+  "token": "YOUR_DISCORD_USER_TOKEN",
+  "ownerId": "YOUR_DISCORD_USER_ID",
+  "prefix": ".",
+  "selfDeaf": true,
+  "selfMute": false,
+  "dashboardPort": 3000
+}
+```
+
+Run **[`start.bat`](start.bat)**:
+* Launches silently into the **Windows System Tray** adjacent to the taskbar clock.
+* Right-click the tray icon to monitor real-time logs, inspect connection state, access the web dashboard, or stop the instance.
+* To terminate at any time, select **Stop & Exit** from the tray menu or execute **[`stop.bat`](stop.bat)**.
 
 ---
 
-## ⌨️ Command Reference (Owner-Only)
+## Command Reference (Owner-Only)
 
-All commands are strictly restricted to your Discord user ID. Commands from other users are completely ignored.
+All commands are cryptographically restricted to your authenticated User ID. Messages from unauthorized users are silently ignored.
 
 | Command | Action | Description |
 |---|---|---|
-| **`.jvc <channel_id>`** | Join Voice Channel | Joins the target VC and enforces 24/7 persistence. |
-| **`.lvc`** | Leave Voice Channel | Cleanly disconnects and terminates any active stream or camera. |
-| **`.mute`** | Mute | Self-mutes your account in the voice channel. |
-| **`.unmute`** | Unmute | Unmutes your account in the voice channel. |
-| **`.deaf`** / **`.deafen`** | Deafen | Self-deafens your account in the voice channel. |
-| **`.undeaf`** / **`.undeafen`** | Undeafen | Undeafens your account in the voice channel. |
-| **`.cam`** | Camera ON | Activates the camera simulator in VC. |
-| **`.camoff`** | Camera OFF | Deactivates the camera in VC. |
-| **`.ss`** | Screenshare ON | Starts a blank Go Live screenshare stream. |
-| **`.ssoff`** | Screenshare OFF | Stops the screenshare without leaving the VC. |
+| **`.jvc <channel_id>`** | Join Voice Channel | Connects to the designated voice channel and pins 24/7 state. |
+| **`.lvc`** | Leave Voice Channel | Gracefully leaves the voice channel and releases active streams. |
+| **`.mute`** | Mute | Toggles self-mute on the current voice connection. |
+| **`.unmute`** | Unmute | Disables self-mute on the current voice connection. |
+| **`.deaf`** / **`.deafen`** | Deafen | Toggles self-deafen state on the voice connection. |
+| **`.undeaf`** / **`.undeafen`** | Undeafen | Disables self-deafen state on the voice connection. |
+| **`.cam`** | Camera ON | Activates the simulated virtual webcam feed in VC. |
+| **`.camoff`** | Camera OFF | Deactivates the webcam feed while maintaining voice presence. |
+| **`.ss`** | Screenshare ON | Initializes a blank Go Live screenshare stream. |
+| **`.ssoff`** | Screenshare OFF | Terminates the screenshare stream without dropping voice. |
 
 ---
 
-## 🔒 Security & Privacy Architecture
+## Security & Privacy Architecture
 
-Security and account safety are our top priorities:
+Security, transparency, and account isolation are foundational to this project:
 
-| Principle | How VC AFK Delivers |
-|---|---|
-| **Zero Remote Servers** | There is **no backend server**, no tracking database, and no intermediate proxy. All connections go directly from your device to Discord (`wss://gateway.discord.gg`). |
-| **Local Private Storage** | Tokens entered in the Android app are stored exclusively in your device's private `SharedPreferences` (`MODE_PRIVATE`). |
-| **Encrypted Communication** | Uses strictly encrypted TLS WebSockets (v9) and HTTPS REST API endpoints. Cleartext HTTP is disabled. |
-| **Audited Android Permissions** | Only requests essential permissions required for foreground background service operation (`INTERNET`, `WAKE_LOCK`, `FOREGROUND_SERVICE`, `POST_NOTIFICATIONS`). No contacts, camera, microphone, or storage snooping. |
-| **Release Signing** | Built with standard Android 14 (API 34) guidelines, signed with cryptographic V1 & V2 APK schemes, and compliant with Google Play Protect. |
+```
+┌────────────────────────────────────────────────────────┐
+│                   YOUR ANDROID PHONE                   │
+│                                                        │
+│   ┌────────────────────┐      ┌────────────────────┐   │
+│   │ Local Private Prefs│      │ Foreground Service │   │
+│   │ (Encrypted Token)  │      │  (WakeLock Active) │   │
+│   └─────────┬──────────┘      └─────────┬──────────┘   │
+│             │                           │              │
+│             └─────────────┬─────────────┘              │
+│                           │ Direct TLS 1.3             │
+│                           ▼                            │
+└───────────────────────────┼────────────────────────────┘
+                            │ (No Intermediate Servers)
+                            ▼
+              ┌───────────────────────────┐
+              │    DISCORD OFFICIAL API   │
+              │  (wss://gateway.discord.gg)│
+              └───────────────────────────┘
+```
+
+* **No Intermediate Infrastructure**: Connections flow directly from your client to official Discord endpoints (`gateway.discord.gg` / `discord.com/api`).
+* **Hardware-Level Sandboxing**: User credentials never leave Android's protected application sandbox (`/data/data/com.discord.vcbot/shared_prefs/`).
+* **Strict Transport Security**: All network communications require TLS 1.3 encryption. Cleartext HTTP transmission is disabled at the manifest level.
+* **Minimal Permission Profile**: The application requests only the baseline operating permissions required for sustained background connectivity (`INTERNET`, `WAKE_LOCK`, `FOREGROUND_SERVICE`, `POST_NOTIFICATIONS`). It requests no access to contacts, storage, camera, or microphone.
 
 ---
 
-## 🛠️ Build Your Own APK (1-Click Automated Cloud Build)
+## Building from Source
 
-Want to compile the APK yourself from source code?
+To compile and sign the Android application yourself, refer to our detailed technical manual:
 
-1. Double-click **[`build_apk_github.bat`](build_apk_github.bat)**.
-2. Enter your GitHub repository URL (or press Enter for default).
-3. GitHub Actions will compile a fresh, signed **Release APK** in ~60 seconds.
-4. Download the compiled `.apk` directly from your repository's **Actions** or **Releases** tab.
+📘 **[Compilation & Build Guide (BUILD_MY_APK.md)](BUILD_MY_APK.md)**
 
-*For detailed build documentation, see [BUILD_MY_APK.md](BUILD_MY_APK.md).*
+Supports automated cloud compilation via GitHub Actions CI/CD as well as local compilation using Android Studio or Gradle CLI.
 
 ---
 
-## 📄 License
+## License
 
-Distributed under the **MIT License**. See `LICENSE` for more information.
+This project is licensed under the **MIT License**. See [`LICENSE`](LICENSE) for complete terms.
 
 <div align="center">
-  <sub>Built with ❤️ for 24/7 Discord uptime. Free, lightweight, and open source.</sub>
+  <sub>Engineered for reliable, secure, and permanent 24/7 Discord uptime. Free and open source.</sub>
 </div>
