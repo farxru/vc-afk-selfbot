@@ -11,3 +11,6 @@ app/build/
 .idea/
 local.properties
 .DS_Store
+hs_err_pid*.log
+replay_pid*.log
+

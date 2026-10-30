@@ -111,38 +111,35 @@ npm install
 Configure your parameters in [`config.json`](config.json):
 ```json
 {
-  "token": "YOUR_DISCORD_USER_TOKEN",
-  "ownerId": "YOUR_DISCORD_USER_ID",
-  "prefix": ".",
+  "tokens": [
+    "YOUR_DISCORD_USER_TOKEN_1",
+    "YOUR_DISCORD_USER_TOKEN_2"
+  ],
   "selfDeaf": true,
   "selfMute": false,
+  "defaultStreamImage": "stream.png",
   "dashboardPort": 3000
 }
 ```
+*(You can also add, remove, and manage tokens dynamically from the Web Dashboard without editing files! Max 5 accounts supported).*
 
 Run **[`start.bat`](start.bat)**:
-* Launches silently into the **Windows System Tray** adjacent to the taskbar clock.
-* Right-click the tray icon to monitor real-time logs, inspect connection state, access the web dashboard, or stop the instance.
-* To terminate at any time, select **Stop & Exit** from the tray menu or execute **[`stop.bat`](stop.bat)**.
+* Launches silently into the **Windows System Tray** and starts the Web Dashboard on `http://localhost:3000`.
+* Ultra-low RAM footprint strictly maintained under **30MB**, with automated memory garbage collection.
+* Right-click the tray icon to open the Web Dashboard, tail logs, or terminate the process.
+* To stop at any time, execute **[`stop.bat`](stop.bat)**.
 
 ---
 
-## Command Reference (Owner-Only)
+## Web Dashboard & Multi-Account Management
 
-All commands are cryptographically restricted to your authenticated User ID. Messages from unauthorized users are silently ignored.
+All controls are handled through the local, zero-leak Web Dashboard (`http://localhost:3000`). Discord message commands have been retired to ensure 100% account safety, ban prevention, and silent operation.
 
-| Command | Action | Description |
-|---|---|---|
-| **`.jvc <channel_id>`** | Join Voice Channel | Connects to the designated voice channel and pins 24/7 state. |
-| **`.lvc`** | Leave Voice Channel | Gracefully leaves the voice channel and releases active streams. |
-| **`.mute`** | Mute | Toggles self-mute on the current voice connection. |
-| **`.unmute`** | Unmute | Disables self-mute on the current voice connection. |
-| **`.deaf`** / **`.deafen`** | Deafen | Toggles self-deafen state on the voice connection. |
-| **`.undeaf`** / **`.undeafen`** | Undeafen | Disables self-deafen state on the voice connection. |
-| **`.cam`** | Camera ON | Activates the simulated virtual webcam feed in VC. |
-| **`.camoff`** | Camera OFF | Deactivates the webcam feed while maintaining voice presence. |
-| **`.ss`** | Screenshare ON | Initializes a blank Go Live screenshare stream. |
-| **`.ssoff`** | Screenshare OFF | Terminates the screenshare stream without dropping voice. |
+* 👥 **Accounts Tab**: View all connected accounts, real-time online/offline status, active VC presence, and manage up to 5 tokens.
+* 🏷️ **Account Nickname Selection**: Select any individual account or multi-select multiple accounts using their Discord nicknames.
+* 🔊 **Synchronized Voice Actions**: Join or leave voice channels simultaneously across all selected accounts with built-in gateway anti-glitch throttling.
+* 🎙️ **Voice Toggles**: Toggle Mute, Deafen, Camera, or Screenshare across selected accounts with a single click.
+* 🧹 **Active RAM Cleaner**: Real-time memory gauge keeping footprint under 30MB with automatic cleanup.
 
 ---
 

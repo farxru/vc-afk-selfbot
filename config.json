@@ -1,7 +1,5 @@
 {
-  "token": "",
-  "ownerId": "",
-  "prefix": ".",
+  "tokens": [],
   "selfDeaf": true,
   "selfMute": false,
   "defaultStreamImage": "stream.png",

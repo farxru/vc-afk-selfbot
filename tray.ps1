@@ -29,7 +29,7 @@ function Start-BotProcess {
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = "cmd.exe"
-    $psi.Arguments = "/c node index.js >> `"$logPath`" 2>&1"
+    $psi.Arguments = "/c node --optimize-for-size --max-old-space-size=64 --expose-gc index.js >> `"$logPath`" 2>&1"
     $psi.WorkingDirectory = $ScriptDir
     $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
     $psi.CreateNoWindow = $true
