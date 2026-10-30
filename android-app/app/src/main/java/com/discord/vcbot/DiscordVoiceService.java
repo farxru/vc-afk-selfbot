@@ -7,25 +7,34 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Binder;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.PowerManager;
 
 import androidx.core.app.NotificationCompat;
 
+import org.json.JSONArray;
+
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public class DiscordVoiceService extends Service implements DiscordGatewayClient.Listener {
     public static final String CHANNEL_ID = "DiscordVoiceServiceChannel";
     public static final int NOTIFICATION_ID = 1001;
+    public static final int MAX_ACCOUNTS = 5;
 
-    public static final String ACTION_START = "ACTION_START";
-    public static final String ACTION_STOP = "ACTION_STOP";
-    public static final String ACTION_MUTE_TOGGLE = "ACTION_MUTE_TOGGLE";
-    public static final String ACTION_DEAF_TOGGLE = "ACTION_DEAF_TOGGLE";
+    public interface UiListener {
+        void onAccountsChanged(List<AccountModel> accounts);
+        void onLog(String message);
+        void onStatsChanged(int total, int online, int inVc);
+    }
 
     private static volatile DiscordVoiceService instance = null;
 
@@ -34,25 +43,23 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
     }
 
     public static boolean isRunning() {
-        return instance != null && instance.isBotRunning();
+        return instance != null;
     }
 
     private final IBinder binder = new LocalBinder();
     private PowerManager.WakeLock wakeLock;
-    private DiscordGatewayClient client;
     private NotificationManager notificationManager;
 
+    private final Map<String, DiscordGatewayClient> clients = new LinkedHashMap<>();
     private final List<String> logHistory = Collections.synchronizedList(new ArrayList<>());
-    private DiscordGatewayClient.Listener uiListener = null;
+    private UiListener uiListener = null;
 
-    private boolean isMuted = false;
-    private boolean isDeafened = true;
-    private boolean isInVc = false;
-    private boolean isCameraOn = false;
-    private boolean isStreaming = false;
-    private boolean isConnected = false;
-    private String currentStatus = "Stopped";
-    private String currentChannel = "None";
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Handler ramMonitorHandler = new Handler(Looper.getMainLooper());
+    private Runnable ramMonitorRunnable;
+
+    private SharedPreferences prefs;
+    private int accountCounter = 1;
 
     public class LocalBinder extends Binder {
         public DiscordVoiceService getService() {
@@ -64,23 +71,26 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
     public void onCreate() {
         super.onCreate();
         instance = this;
+        prefs = getSharedPreferences("discord_vc_bot_prefs", MODE_PRIVATE);
         notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         createNotificationChannel();
 
         PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
         if (powerManager != null) {
             wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "DiscordVCBot::ServiceWakeLock");
-            wakeLock.acquire(24 * 60 * 60 * 1000L); // Keep CPU awake up to 24h
+            wakeLock.acquire(24 * 60 * 60 * 1000L); // 24h wakelock
         }
 
-        client = new DiscordGatewayClient(this);
+        startForeground(NOTIFICATION_ID, buildNotification("Ready", 0, 0));
+        loadSavedAccounts();
+        startRamMonitor();
     }
 
-    public void setUiListener(DiscordGatewayClient.Listener listener) {
+    public void setUiListener(UiListener listener) {
         this.uiListener = listener;
         if (listener != null) {
-            listener.onStatusChanged(currentStatus, isConnected);
-            listener.onVoiceStateChanged(currentChannel, isInVc, isMuted, isDeafened, isCameraOn, isStreaming);
+            listener.onAccountsChanged(getAccountsList());
+            notifyStats();
         }
     }
 
@@ -96,47 +106,235 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
         }
     }
 
-    public String getCurrentStatus() {
-        return currentStatus;
+    public List<AccountModel> getAccountsList() {
+        List<AccountModel> list = new ArrayList<>();
+        synchronized (clients) {
+            for (DiscordGatewayClient c : clients.values()) {
+                list.add(c.getAccount());
+            }
+        }
+        return list;
     }
 
-    public boolean isConnected() {
-        return isConnected;
+    private void loadSavedAccounts() {
+        String tokensJson = prefs.getString("pref_tokens_json", null);
+        List<String> tokens = new ArrayList<>();
+
+        if (tokensJson != null && !tokensJson.trim().isEmpty()) {
+            try {
+                JSONArray arr = new JSONArray(tokensJson);
+                for (int i = 0; i < arr.length() && i < MAX_ACCOUNTS; i++) {
+                    String t = arr.getString(i).trim();
+                    if (!t.isEmpty() && !tokens.contains(t)) {
+                        tokens.add(t);
+                    }
+                }
+            } catch (Exception ignored) {}
+        } else {
+            // Backward compatibility
+            String singleToken = prefs.getString("pref_token", null);
+            if (singleToken != null && !singleToken.trim().isEmpty()) {
+                tokens.add(singleToken.trim());
+            }
+        }
+
+        String targetChannel = prefs.getString("pref_channel_id", null);
+        boolean autoDeaf = prefs.getBoolean("pref_auto_deaf", true);
+        boolean autoMute = prefs.getBoolean("pref_auto_mute", false);
+
+        for (String t : tokens) {
+            String accId = "acc_" + (accountCounter++);
+            DiscordGatewayClient client = new DiscordGatewayClient(accId, t, this);
+            clients.put(accId, client);
+            client.start(targetChannel, autoDeaf, autoMute);
+        }
     }
 
-    public String getCurrentChannel() {
-        return currentChannel;
+    public void saveTokens() {
+        JSONArray arr = new JSONArray();
+        synchronized (clients) {
+            for (DiscordGatewayClient c : clients.values()) {
+                arr.put(c.getAccount().getToken());
+            }
+        }
+        prefs.edit().putString("pref_tokens_json", arr.toString()).apply();
     }
 
-    public boolean isMuted() {
-        return isMuted;
+    public boolean addAccount(String token, String targetChannel, boolean autoDeaf, boolean autoMute) {
+        if (token == null || token.trim().isEmpty()) return false;
+        String trimmedToken = token.trim();
+
+        synchronized (clients) {
+            if (clients.size() >= MAX_ACCOUNTS) {
+                appendLog("[!] Maximum limit of " + MAX_ACCOUNTS + " accounts reached.");
+                return false;
+            }
+            for (DiscordGatewayClient c : clients.values()) {
+                if (c.getAccount().getToken().equals(trimmedToken)) {
+                    appendLog("[!] Account with this token already exists.");
+                    return false;
+                }
+            }
+
+            String accId = "acc_" + (accountCounter++);
+            DiscordGatewayClient client = new DiscordGatewayClient(accId, trimmedToken, this);
+            clients.put(accId, client);
+            saveTokens();
+            client.start(targetChannel, autoDeaf, autoMute);
+        }
+
+        notifyAccountsChanged();
+        notifyStats();
+        cleanRam("Account added");
+        return true;
     }
 
-    public boolean isDeafened() {
-        return isDeafened;
+    public void removeAccount(String accountId) {
+        DiscordGatewayClient client;
+        synchronized (clients) {
+            client = clients.remove(accountId);
+            if (client != null) {
+                client.stop();
+                saveTokens();
+            }
+        }
+        if (client != null) {
+            appendLog("[-] Removed account " + accountId);
+            notifyAccountsChanged();
+            notifyStats();
+            cleanRam("Account removed");
+        }
     }
 
-    public boolean isCameraOn() {
-        return isCameraOn;
+    public void joinVc(List<String> accountIds, String channelId) {
+        if (channelId == null || channelId.trim().isEmpty()) return;
+        final String chId = channelId.trim().replaceAll("[<#>]", "");
+        prefs.edit().putString("pref_channel_id", chId).apply();
+
+        List<DiscordGatewayClient> targetClients = new ArrayList<>();
+        synchronized (clients) {
+            for (String id : accountIds) {
+                DiscordGatewayClient c = clients.get(id);
+                if (c != null) targetClients.add(c);
+            }
+        }
+
+        if (targetClients.isEmpty()) return;
+
+        // Stagger joins by 250ms to prevent gateway rate-limits / glitching
+        for (int i = 0; i < targetClients.size(); i++) {
+            final DiscordGatewayClient c = targetClients.get(i);
+            long delay = i * 250L;
+            mainHandler.postDelayed(() -> c.joinVoiceChannel(null, chId), delay);
+        }
+        cleanRam("post joinVc");
     }
 
-    public boolean isStreaming() {
-        return isStreaming;
+    public void leaveVc(List<String> accountIds) {
+        synchronized (clients) {
+            for (String id : accountIds) {
+                DiscordGatewayClient c = clients.get(id);
+                if (c != null) {
+                    c.leaveVoiceChannel();
+                }
+            }
+        }
+        cleanRam("post leaveVc");
+    }
+
+    public void toggleMute(List<String> accountIds) {
+        synchronized (clients) {
+            for (String id : accountIds) {
+                DiscordGatewayClient c = clients.get(id);
+                if (c != null) {
+                    c.setMute(!c.getAccount().isMuted());
+                }
+            }
+        }
+    }
+
+    public void toggleDeaf(List<String> accountIds) {
+        synchronized (clients) {
+            for (String id : accountIds) {
+                DiscordGatewayClient c = clients.get(id);
+                if (c != null) {
+                    c.setDeafen(!c.getAccount().isDeafened());
+                }
+            }
+        }
+    }
+
+    public void toggleCamera(List<String> accountIds) {
+        synchronized (clients) {
+            for (String id : accountIds) {
+                DiscordGatewayClient c = clients.get(id);
+                if (c != null) {
+                    c.setCamera(!c.getAccount().isCameraOn());
+                }
+            }
+        }
+    }
+
+    public void toggleStream(List<String> accountIds) {
+        synchronized (clients) {
+            for (String id : accountIds) {
+                DiscordGatewayClient c = clients.get(id);
+                if (c != null) {
+                    if (c.getAccount().isStreaming()) {
+                        c.stopScreenShare();
+                    } else {
+                        c.startScreenShare();
+                    }
+                }
+            }
+        }
+    }
+
+    public void cleanRam(String reason) {
+        long beforeBytes = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
+        long beforeMb = beforeBytes / (1024 * 1024);
+
+        // Limit log entries to keep memory tight
+        synchronized (logHistory) {
+            while (logHistory.size() > 50) {
+                logHistory.remove(0);
+            }
+        }
+
+        System.gc();
+
+        long afterBytes = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
+        long afterMb = afterBytes / (1024 * 1024);
+        appendLog("[RAM Cleaner] (" + reason + ") Cleaned: " + beforeMb + "MB -> " + afterMb + "MB");
+    }
+
+    private void startRamMonitor() {
+        ramMonitorRunnable = new Runnable() {
+            @Override
+            public void run() {
+                long usedBytes = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
+                long usedMb = usedBytes / (1024 * 1024);
+                // Whenever RAM touches 28-30MB, clean it automatically
+                if (usedMb >= 28) {
+                    cleanRam("Auto-Clean >= 30MB");
+                }
+                ramMonitorHandler.postDelayed(this, 3000);
+            }
+        };
+        ramMonitorHandler.postDelayed(ramMonitorRunnable, 3000);
     }
 
     public void stopBotCompletely() {
-        currentStatus = "Stopped";
-        isConnected = false;
-        isInVc = false;
-        currentChannel = "None";
-
-        if (client != null) {
-            client.stop();
+        if (ramMonitorRunnable != null) {
+            ramMonitorHandler.removeCallbacks(ramMonitorRunnable);
+            ramMonitorRunnable = null;
         }
 
-        if (uiListener != null) {
-            uiListener.onStatusChanged("Stopped", false);
-            uiListener.onVoiceStateChanged("None", false, false, false, false, false);
+        synchronized (clients) {
+            for (DiscordGatewayClient c : clients.values()) {
+                c.stop();
+            }
+            clients.clear();
         }
 
         if (wakeLock != null && wakeLock.isHeld()) {
@@ -151,16 +349,6 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
             } else {
                 stopForeground(true);
             }
-            if (notificationManager != null) {
-                notificationManager.cancel(NOTIFICATION_ID);
-            }
-        } catch (Exception ignored) {}
-
-        try {
-            getSharedPreferences("discord_vc_bot_prefs", MODE_PRIVATE)
-                    .edit()
-                    .putBoolean("bot_started", false)
-                    .apply();
         } catch (Exception ignored) {}
 
         stopSelf();
@@ -168,164 +356,102 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
     }
 
     @Override
-    public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && intent.getAction() != null) {
-            String action = intent.getAction();
-            if (ACTION_STOP.equals(action)) {
-                stopBotCompletely();
-                return START_NOT_STICKY;
-            } else if (ACTION_MUTE_TOGGLE.equals(action)) {
-                if (client != null) client.setMute(!isMuted);
-                return START_STICKY;
-            } else if (ACTION_DEAF_TOGGLE.equals(action)) {
-                if (client != null) client.setDeafen(!isDeafened);
-                return START_STICKY;
-            } else if (ACTION_START.equals(action)) {
-                String token = intent.getStringExtra("token");
-                String ownerId = intent.getStringExtra("ownerId");
-                String prefix = intent.getStringExtra("prefix");
-                String channelId = intent.getStringExtra("channelId");
-                boolean autoDeaf = intent.getBooleanExtra("autoDeaf", true);
-                boolean autoMute = intent.getBooleanExtra("autoMute", false);
-
-                if (wakeLock != null && !wakeLock.isHeld()) {
-                    try {
-                        wakeLock.acquire(24 * 60 * 60 * 1000L);
-                    } catch (Exception ignored) {}
-                }
-
-                if (client == null) {
-                    client = new DiscordGatewayClient(this);
-                }
-
-                startForeground(NOTIFICATION_ID, buildNotification("Discord VC Bot 24/7", "Starting service..."));
-                client.start(token, ownerId, prefix, channelId, autoDeaf, autoMute);
-                return START_STICKY;
-            }
-        }
-
-        startForeground(NOTIFICATION_ID, buildNotification("Discord VC Bot 24/7", "Starting service..."));
-        return START_STICKY;
-    }
-
-    public DiscordGatewayClient getClient() {
-        return client;
-    }
-
-    public boolean isBotRunning() {
-        return client != null && client.isRunning();
-    }
-
-    public boolean isInVc() {
-        return isInVc;
-    }
-
-    private void createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel channel = new NotificationChannel(
-                    CHANNEL_ID,
-                    "Discord 24/7 VC Background Service",
-                    NotificationManager.IMPORTANCE_LOW
-            );
-            channel.setDescription("Keeps Discord VC Bot alive 24/7 in the background");
-            if (notificationManager != null) {
-                notificationManager.createNotificationChannel(channel);
-            }
-        }
-    }
-
-    private Notification buildNotification(String title, String content) {
-        Intent notificationIntent = new Intent(this, MainActivity.class);
-        PendingIntent pendingIntent = PendingIntent.getActivity(
-                this, 0, notificationIntent,
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0
-        );
-
-        Intent stopIntent = new Intent(this, DiscordVoiceService.class);
-        stopIntent.setAction(ACTION_STOP);
-        PendingIntent stopPendingIntent = PendingIntent.getService(
-                this, 1, stopIntent,
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0
-        );
-
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle(title)
-                .setContentText(content)
-                .setSmallIcon(R.drawable.ic_launcher)
-                .setContentIntent(pendingIntent)
-                .setOngoing(true)
-                .addAction(android.R.drawable.ic_delete, "Stop Bot", stopPendingIntent);
-
-        return builder.build();
-    }
-
-    private void updateNotification(String title, String content) {
-        if (notificationManager != null) {
-            Notification notification = buildNotification(title, content);
-            notificationManager.notify(NOTIFICATION_ID, notification);
-        }
+    public void onLog(String accountId, String message) {
+        appendLog(message);
     }
 
     @Override
-    public void onLog(String message) {
+    public void onAccountUpdated(AccountModel account) {
+        mainHandler.post(() -> {
+            notifyAccountsChanged();
+            notifyStats();
+        });
+    }
+
+    private void appendLog(String line) {
         synchronized (logHistory) {
-            logHistory.add(message);
-            if (logHistory.size() > 300) {
+            logHistory.add(line);
+            if (logHistory.size() > 100) {
                 logHistory.remove(0);
             }
         }
         if (uiListener != null) {
-            uiListener.onLog(message);
+            mainHandler.post(() -> uiListener.onLog(line));
         }
     }
 
-    @Override
-    public void onStatusChanged(String status, boolean connected) {
-        this.currentStatus = status;
-        this.isConnected = connected;
-        if (!"Stopped".equals(status)) {
-            String content = isInVc ? ("In VC: " + currentChannel) : (connected ? "Connected to Gateway" : "24/7 service active");
-            updateNotification("Discord VC Bot: " + status, content);
-        }
+    private void notifyAccountsChanged() {
         if (uiListener != null) {
-            uiListener.onStatusChanged(status, connected);
+            uiListener.onAccountsChanged(getAccountsList());
         }
     }
 
-    @Override
-    public void onVoiceStateChanged(String channelId, boolean inVc, boolean muted, boolean deafened, boolean camera, boolean streaming) {
-        this.isInVc = inVc;
-        this.isMuted = muted;
-        this.isDeafened = deafened;
-        this.isCameraOn = camera;
-        this.isStreaming = streaming;
-        this.currentChannel = (channelId != null && !channelId.equals("null")) ? channelId : "None";
+    private void notifyStats() {
+        int total = clients.size();
+        int online = 0;
+        int inVc = 0;
+        synchronized (clients) {
+            for (DiscordGatewayClient c : clients.values()) {
+                if ("Online".equals(c.getAccount().getStatus())) online++;
+                if (c.getAccount().isInVc()) inVc++;
+            }
+        }
 
-        String state = inVc ? ("In VC: " + currentChannel + (muted ? " [Muted]" : "") + (deafened ? " [Deaf]" : "")) : "Connected (Waiting for VC)";
-        updateNotification("Discord VC Bot 24/7", state);
+        updateNotification(online, inVc);
 
         if (uiListener != null) {
-            uiListener.onVoiceStateChanged(channelId, inVc, muted, deafened, camera, streaming);
+            uiListener.onStatsChanged(total, online, inVc);
         }
     }
 
-    @Override
-    public void onTaskRemoved(Intent rootIntent) {
-        // App was swiped away from recent apps.
-        // Foreground service continues running 24/7 in background.
-        uiListener = null;
-        super.onTaskRemoved(rootIntent);
+    private void updateNotification(int online, int inVc) {
+        Notification notification = buildNotification(online + "/" + clients.size() + " Online", online, inVc);
+        if (notificationManager != null) {
+            notificationManager.notify(NOTIFICATION_ID, notification);
+        }
     }
 
-    @Override
-    public void onDestroy() {
-        stopBotCompletely();
-        uiListener = null;
-        super.onDestroy();
+    private Notification buildNotification(String statusText, int online, int inVc) {
+        Intent notificationIntent = new Intent(this, MainActivity.class);
+        PendingIntent pendingIntent = PendingIntent.getActivity(
+                this, 0, notificationIntent,
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
+        );
+
+        String content = "Online: " + online + "/" + clients.size() + " | In VC: " + inVc;
+
+        return new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("VC AFK Bot 24/7 (" + statusText + ")")
+                .setContentText(content)
+                .setSmallIcon(R.drawable.ic_launcher)
+                .setContentIntent(pendingIntent)
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build();
+    }
+
+    private void createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel serviceChannel = new NotificationChannel(
+                    CHANNEL_ID,
+                    "Discord Voice Service",
+                    NotificationManager.IMPORTANCE_LOW
+            );
+            serviceChannel.setDescription("24/7 Discord Voice Channel Background Service");
+            if (notificationManager != null) {
+                notificationManager.createNotificationChannel(serviceChannel);
+            }
+        }
     }
 
     @Override
     public IBinder onBind(Intent intent) {
         return binder;
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        stopBotCompletely();
     }
 }

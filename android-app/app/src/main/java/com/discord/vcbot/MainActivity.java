@@ -1,20 +1,26 @@
 package com.discord.vcbot;
 
+import android.app.AlertDialog;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
-import android.net.Uri;
+import android.graphics.Color;
+import android.graphics.Typeface;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.IBinder;
-import android.os.PowerManager;
-import android.provider.Settings;
+import android.os.Looper;
+import android.text.InputType;
+import android.text.TextUtils;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -22,27 +28,48 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
-public class MainActivity extends AppCompatActivity implements DiscordGatewayClient.Listener {
+public class MainActivity extends AppCompatActivity implements DiscordVoiceService.UiListener {
 
-    private EditText editToken, editOwnerId, editChannelId, editPrefix;
-    private CheckBox checkAutoDeaf, checkAutoMute;
-    private TextView textStatus, textLogs;
+    private TextView textHeaderRam;
+    private Button btnTabControl, btnTabAccounts, btnTabLogs;
+    private View layoutTabControl, layoutTabAccounts, layoutTabLogs;
+
+    // Control Tab Views
+    private LinearLayout containerSelectionPills;
+    private TextView textSelectionSummary;
+    private Button btnSelectAll, btnDeselectAll;
+    private EditText editChannelId;
+    private Button btnJoinVcSelected, btnLeaveVcSelected;
+    private Button btnToggleMuteSelected, btnToggleDeafSelected, btnToggleCamSelected, btnToggleStreamSelected;
+    private TextView textRamStatus;
+    private Button btnCleanRam;
+
+    // Accounts Tab Views
+    private TextView textStatTotal, textStatOnline, textStatInVc;
+    private EditText editNewToken;
+    private Button btnToggleTokenVisibility, btnAddAccount;
+    private TextView textMaxLimitWarning;
+    private LinearLayout containerAccountsList;
+
+    // Logs Tab Views
+    private TextView textLogs;
     private ScrollView scrollLogs;
-    private Button btnStartStop, btnJoinVc, btnLeaveVc;
-    private Button btnMute, btnDeaf, btnCamera, btnStream;
+    private Button btnClearLogs;
 
     private DiscordVoiceService service;
     private boolean isBound = false;
-    private boolean isBotRunning = false;
-    private boolean isInVc = false;
-    private boolean isMuted = false;
-    private boolean isDeafened = true;
-    private boolean isCamOn = false;
-    private boolean isStreaming = false;
-
     private SharedPreferences prefs;
+
+    private final Set<String> selectedAccountIds = new HashSet<>();
+    private final Handler ramUpdateHandler = new Handler(Looper.getMainLooper());
+    private Runnable ramUpdateRunnable;
+    private boolean isTokenVisible = false;
 
     private final ServiceConnection serviceConnection = new ServiceConnection() {
         @Override
@@ -50,8 +77,8 @@ public class MainActivity extends AppCompatActivity implements DiscordGatewayCli
             DiscordVoiceService.LocalBinder b = (DiscordVoiceService.LocalBinder) binder;
             service = b.getService();
             isBound = true;
-            syncWithService(service);
-            appendLog("[+] Connected to Background Service.");
+            service.setUiListener(MainActivity.this);
+            refreshAllUi();
         }
 
         @Override
@@ -72,406 +99,497 @@ public class MainActivity extends AppCompatActivity implements DiscordGatewayCli
         prefs = getSharedPreferences("discord_vc_bot_prefs", MODE_PRIVATE);
 
         initViews();
-        loadSavedConfig();
-        requestPermissionsIfNeeded();
-
-        // Check if service is already running in background and connect immediately
-        checkAndBindService();
+        setupTabs();
+        setupActions();
+        startServiceAndBind();
+        startRamUiTimer();
     }
 
-    @Override
-    protected void onStart() {
-        super.onStart();
-        checkAndBindService();
-    }
+    private void initViews() {
+        textHeaderRam = findViewById(R.id.textHeaderRam);
+        btnTabControl = findViewById(R.id.btnTabControl);
+        btnTabAccounts = findViewById(R.id.btnTabAccounts);
+        btnTabLogs = findViewById(R.id.btnTabLogs);
 
-    @Override
-    protected void onResume() {
-        super.onResume();
-        if (service != null && isBound) {
-            syncWithService(service);
-        } else {
-            checkAndBindService();
+        layoutTabControl = findViewById(R.id.layoutTabControl);
+        layoutTabAccounts = findViewById(R.id.layoutTabAccounts);
+        layoutTabLogs = findViewById(R.id.layoutTabLogs);
+
+        containerSelectionPills = findViewById(R.id.containerSelectionPills);
+        textSelectionSummary = findViewById(R.id.textSelectionSummary);
+        btnSelectAll = findViewById(R.id.btnSelectAll);
+        btnDeselectAll = findViewById(R.id.btnDeselectAll);
+
+        editChannelId = findViewById(R.id.editChannelId);
+        btnJoinVcSelected = findViewById(R.id.btnJoinVcSelected);
+        btnLeaveVcSelected = findViewById(R.id.btnLeaveVcSelected);
+
+        btnToggleMuteSelected = findViewById(R.id.btnToggleMuteSelected);
+        btnToggleDeafSelected = findViewById(R.id.btnToggleDeafSelected);
+        btnToggleCamSelected = findViewById(R.id.btnToggleCamSelected);
+        btnToggleStreamSelected = findViewById(R.id.btnToggleStreamSelected);
+
+        textRamStatus = findViewById(R.id.textRamStatus);
+        btnCleanRam = findViewById(R.id.btnCleanRam);
+
+        textStatTotal = findViewById(R.id.textStatTotal);
+        textStatOnline = findViewById(R.id.textStatOnline);
+        textStatInVc = findViewById(R.id.textStatInVc);
+
+        editNewToken = findViewById(R.id.editNewToken);
+        btnToggleTokenVisibility = findViewById(R.id.btnToggleTokenVisibility);
+        btnAddAccount = findViewById(R.id.btnAddAccount);
+        textMaxLimitWarning = findViewById(R.id.textMaxLimitWarning);
+        containerAccountsList = findViewById(R.id.containerAccountsList);
+
+        textLogs = findViewById(R.id.textLogs);
+        scrollLogs = findViewById(R.id.scrollLogs);
+        btnClearLogs = findViewById(R.id.btnClearLogs);
+
+        // Load saved channel ID
+        String savedChannel = prefs.getString("pref_channel_id", "");
+        if (!savedChannel.isEmpty()) {
+            editChannelId.setText(savedChannel);
         }
     }
 
-    @Override
-    protected void onPause() {
-        saveConfig();
-        super.onPause();
+    private void setupTabs() {
+        btnTabControl.setOnClickListener(v -> switchTab(0));
+        btnTabAccounts.setOnClickListener(v -> switchTab(1));
+        btnTabLogs.setOnClickListener(v -> switchTab(2));
     }
 
-    @Override
-    protected void onStop() {
-        if (isBound) {
-            if (service != null) {
-                service.setUiListener(null);
-            }
-            try {
-                unbindService(serviceConnection);
-            } catch (Exception ignored) {}
-            isBound = false;
-        }
-        super.onStop();
+    private void switchTab(int tabIndex) {
+        layoutTabControl.setVisibility(tabIndex == 0 ? View.VISIBLE : View.GONE);
+        layoutTabAccounts.setVisibility(tabIndex == 1 ? View.VISIBLE : View.GONE);
+        layoutTabLogs.setVisibility(tabIndex == 2 ? View.VISIBLE : View.GONE);
+
+        btnTabControl.setBackgroundResource(tabIndex == 0 ? R.drawable.btn_blurple : android.R.color.transparent);
+        btnTabControl.setTextColor(tabIndex == 0 ? Color.WHITE : Color.parseColor("#949BA4"));
+
+        btnTabAccounts.setBackgroundResource(tabIndex == 1 ? R.drawable.btn_blurple : android.R.color.transparent);
+        btnTabAccounts.setTextColor(tabIndex == 1 ? Color.WHITE : Color.parseColor("#949BA4"));
+
+        btnTabLogs.setBackgroundResource(tabIndex == 2 ? R.drawable.btn_blurple : android.R.color.transparent);
+        btnTabLogs.setTextColor(tabIndex == 2 ? Color.WHITE : Color.parseColor("#949BA4"));
     }
 
-    @Override
-    protected void onDestroy() {
-        if (isBound) {
-            if (service != null) {
-                service.setUiListener(null);
-            }
-            try {
-                unbindService(serviceConnection);
-            } catch (Exception ignored) {}
-            isBound = false;
-        }
-        super.onDestroy();
-    }
-
-    private void checkAndBindService() {
-        DiscordVoiceService running = DiscordVoiceService.getInstance();
-        if (running != null && running.isBotRunning()) {
-            syncWithService(running);
-            Intent serviceIntent = new Intent(this, DiscordVoiceService.class);
-            bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE);
-        } else if (prefs.getBoolean("bot_started", false) && running != null && running.isBotRunning()) {
-            Intent serviceIntent = new Intent(this, DiscordVoiceService.class);
-            bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE);
-        } else {
-            isBotRunning = false;
-            isInVc = false;
-            btnStartStop.setText("START 24/7 BOT (BACKGROUND)");
-            btnStartStop.setBackgroundColor(0xFF5865F2);
-            textStatus.setText("🔴 Status: Stopped");
-            textStatus.setTextColor(0xFFED4245);
-        }
-    }
-
-    private void syncWithService(DiscordVoiceService svc) {
-        if (svc == null) return;
-        this.service = svc;
-        this.isBound = true;
-        svc.setUiListener(this);
-        restoreLogsFromService(svc);
-
-        boolean running = svc.isBotRunning();
-        this.isBotRunning = running;
-        this.isInVc = svc.isInVc();
-        this.isMuted = svc.isMuted();
-        this.isDeafened = svc.isDeafened();
-        this.isCamOn = svc.isCameraOn();
-        this.isStreaming = svc.isStreaming();
-
-        runOnUiThread(() -> {
-            if (running) {
-                btnStartStop.setText("STOP 24/7 BOT");
-                btnStartStop.setBackgroundColor(0xFFED4245); // Discord Red
+    private void setupActions() {
+        // Toggle Token Visibility
+        btnToggleTokenVisibility.setOnClickListener(v -> {
+            isTokenVisible = !isTokenVisible;
+            if (isTokenVisible) {
+                editNewToken.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+                btnToggleTokenVisibility.setText("🔒");
             } else {
-                btnStartStop.setText("START 24/7 BOT (BACKGROUND)");
-                btnStartStop.setBackgroundColor(0xFF5865F2); // Discord Blurple
+                editNewToken.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+                btnToggleTokenVisibility.setText("👁️");
             }
+            editNewToken.setSelection(editNewToken.getText().length());
+        });
 
-            btnMute.setText(isMuted ? "UNMUTE" : "MUTE");
-            btnDeaf.setText(isDeafened ? "UNDEAFEN" : "DEAFEN");
-            btnCamera.setText(isCamOn ? "CAM OFF" : "CAM ON");
-            btnStream.setText(isStreaming ? "STOP STREAM" : "SCREENSHARE");
-
-            if (svc.isInVc()) {
-                textStatus.setText("🟢 In VC: " + svc.getCurrentChannel());
-                textStatus.setTextColor(0xFF3BA55D);
-            } else if (svc.isConnected()) {
-                textStatus.setText("Status: " + svc.getCurrentStatus());
-                textStatus.setTextColor(0xFF3BA55D);
-            } else if (running) {
-                textStatus.setText("⚡ Status: " + svc.getCurrentStatus());
-                textStatus.setTextColor(0xFFFAA61A);
-            } else {
-                textStatus.setText("🔴 Status: Stopped");
-                textStatus.setTextColor(0xFFED4245);
+        // Add Account
+        btnAddAccount.setOnClickListener(v -> {
+            String token = editNewToken.getText().toString().trim();
+            if (token.isEmpty()) {
+                Toast.makeText(this, "Please paste a Discord user token", Toast.LENGTH_SHORT).show();
+                return;
             }
+            if (service != null) {
+                String chId = editChannelId.getText().toString().trim();
+                boolean added = service.addAccount(token, chId.isEmpty() ? null : chId, true, false);
+                if (added) {
+                    editNewToken.setText("");
+                    Toast.makeText(this, "Account added successfully!", Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(this, "Failed to add account (limit 5 or already exists)", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+
+        // Selection buttons
+        btnSelectAll.setOnClickListener(v -> {
+            if (service != null) {
+                for (AccountModel a : service.getAccountsList()) {
+                    selectedAccountIds.add(a.getId());
+                }
+                refreshSelectionViews(service.getAccountsList());
+            }
+        });
+
+        btnDeselectAll.setOnClickListener(v -> {
+            selectedAccountIds.clear();
+            if (service != null) {
+                refreshSelectionViews(service.getAccountsList());
+            }
+        });
+
+        // Join VC Selected
+        btnJoinVcSelected.setOnClickListener(v -> {
+            String chId = editChannelId.getText().toString().trim();
+            if (chId.isEmpty()) {
+                Toast.makeText(this, "Please enter a Voice Channel ID", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (selectedAccountIds.isEmpty()) {
+                Toast.makeText(this, "Please select at least one account", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (service != null) {
+                service.joinVc(new ArrayList<>(selectedAccountIds), chId);
+                Toast.makeText(this, "Joining VC on " + selectedAccountIds.size() + " account(s)...", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        // Leave VC Selected
+        btnLeaveVcSelected.setOnClickListener(v -> {
+            if (selectedAccountIds.isEmpty()) {
+                Toast.makeText(this, "Please select at least one account", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (service != null) {
+                service.leaveVc(new ArrayList<>(selectedAccountIds));
+                Toast.makeText(this, "Leaving VC for " + selectedAccountIds.size() + " account(s)", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        // Quick Toggles
+        btnToggleMuteSelected.setOnClickListener(v -> {
+            if (service != null && !selectedAccountIds.isEmpty()) {
+                service.toggleMute(new ArrayList<>(selectedAccountIds));
+            }
+        });
+
+        btnToggleDeafSelected.setOnClickListener(v -> {
+            if (service != null && !selectedAccountIds.isEmpty()) {
+                service.toggleDeaf(new ArrayList<>(selectedAccountIds));
+            }
+        });
+
+        btnToggleCamSelected.setOnClickListener(v -> {
+            if (service != null && !selectedAccountIds.isEmpty()) {
+                service.toggleCamera(new ArrayList<>(selectedAccountIds));
+            }
+        });
+
+        btnToggleStreamSelected.setOnClickListener(v -> {
+            if (service != null && !selectedAccountIds.isEmpty()) {
+                service.toggleStream(new ArrayList<>(selectedAccountIds));
+            }
+        });
+
+        // RAM Cleaner Button
+        btnCleanRam.setOnClickListener(v -> {
+            if (service != null) {
+                service.cleanRam("Manual Trigger");
+                Toast.makeText(this, "RAM cleaned!", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        // Clear Logs
+        btnClearLogs.setOnClickListener(v -> {
+            if (service != null) {
+                service.clearLogHistory();
+            }
+            textLogs.setText("");
         });
     }
 
-    private void restoreLogsFromService(DiscordVoiceService svc) {
-        if (svc == null) return;
-        List<String> logs = svc.getLogHistory();
-        if (logs.isEmpty()) return;
+    private void startServiceAndBind() {
+        Intent serviceIntent = new Intent(this, DiscordVoiceService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            ContextCompat.startForegroundService(this, serviceIntent);
+        } else {
+            startService(serviceIntent);
+        }
+        bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE);
+    }
 
+    private void refreshAllUi() {
+        if (service == null) return;
+        List<AccountModel> accounts = service.getAccountsList();
+
+        // Default selection: if empty, select all
+        if (selectedAccountIds.isEmpty() && !accounts.isEmpty()) {
+            for (AccountModel a : accounts) {
+                selectedAccountIds.add(a.getId());
+            }
+        }
+
+        refreshSelectionViews(accounts);
+        refreshAccountsList(accounts);
+
+        // Populate logs
+        List<String> logs = service.getLogHistory();
         StringBuilder sb = new StringBuilder();
         for (String line : logs) {
             sb.append(line).append("\n");
         }
-        final String allLogs = sb.toString();
-        runOnUiThread(() -> {
-            textLogs.setText(allLogs);
-            scrollLogs.post(() -> scrollLogs.fullScroll(View.FOCUS_DOWN));
-        });
+        textLogs.setText(sb.toString());
+        scrollLogs.post(() -> scrollLogs.fullScroll(View.FOCUS_DOWN));
     }
 
-    private DiscordVoiceService getActiveService() {
-        if (service != null) return service;
-        return DiscordVoiceService.getInstance();
-    }
+    private void refreshSelectionViews(List<AccountModel> accounts) {
+        containerSelectionPills.removeAllViews();
+        List<String> selectedNicknames = new ArrayList<>();
 
-    private void initViews() {
-        editToken = findViewById(R.id.editToken);
-        editOwnerId = findViewById(R.id.editOwnerId);
-        editChannelId = findViewById(R.id.editChannelId);
-        editPrefix = findViewById(R.id.editPrefix);
-        checkAutoDeaf = findViewById(R.id.checkAutoDeaf);
-        checkAutoMute = findViewById(R.id.checkAutoMute);
-        textStatus = findViewById(R.id.textStatus);
-        textLogs = findViewById(R.id.textLogs);
-        scrollLogs = findViewById(R.id.scrollLogs);
-
-        btnStartStop = findViewById(R.id.btnStartStop);
-        btnJoinVc = findViewById(R.id.btnJoinVc);
-        btnLeaveVc = findViewById(R.id.btnLeaveVc);
-        btnMute = findViewById(R.id.btnMute);
-        btnDeaf = findViewById(R.id.btnDeaf);
-        btnCamera = findViewById(R.id.btnCamera);
-        btnStream = findViewById(R.id.btnStream);
-
-        btnStartStop.setOnClickListener(v -> toggleBotService());
-        btnJoinVc.setOnClickListener(v -> joinVcClicked());
-        btnLeaveVc.setOnClickListener(v -> leaveVcClicked());
-        btnMute.setOnClickListener(v -> toggleMute());
-        btnDeaf.setOnClickListener(v -> toggleDeaf());
-        btnCamera.setOnClickListener(v -> toggleCamera());
-        btnStream.setOnClickListener(v -> toggleStream());
-
-        findViewById(R.id.btnClearLogs).setOnClickListener(v -> {
-            textLogs.setText("");
-            DiscordVoiceService svc = getActiveService();
-            if (svc != null) {
-                svc.clearLogHistory();
-            }
-        });
-    }
-
-    private void loadSavedConfig() {
-        // Fresh defaults for everyone: no pre-set token or personal ID hardcoded
-        editToken.setText(prefs.getString("token", ""));
-        editOwnerId.setText(prefs.getString("ownerId", ""));
-        editPrefix.setText(prefs.getString("prefix", "."));
-        editChannelId.setText(prefs.getString("channelId", ""));
-        checkAutoDeaf.setChecked(prefs.getBoolean("autoDeaf", true));
-        checkAutoMute.setChecked(prefs.getBoolean("autoMute", false));
-    }
-
-    private void saveConfig() {
-        prefs.edit()
-                .putString("token", editToken.getText().toString().trim())
-                .putString("ownerId", editOwnerId.getText().toString().trim())
-                .putString("prefix", editPrefix.getText().toString().trim())
-                .putString("channelId", editChannelId.getText().toString().trim())
-                .putBoolean("autoDeaf", checkAutoDeaf.isChecked())
-                .putBoolean("autoMute", checkAutoMute.isChecked())
-                .apply();
-    }
-
-    private void toggleBotService() {
-        saveConfig();
-        if (!isBotRunning) {
-            String token = editToken.getText().toString().trim();
-            String ownerId = editOwnerId.getText().toString().trim();
-            String prefix = editPrefix.getText().toString().trim();
-            String channelId = editChannelId.getText().toString().trim();
-
-            if (token.isEmpty() || ownerId.isEmpty()) {
-                Toast.makeText(this, "Please enter your Token and Owner ID!", Toast.LENGTH_SHORT).show();
-                return;
-            }
-
-            prefs.edit().putBoolean("bot_started", true).apply();
-
-            Intent serviceIntent = new Intent(this, DiscordVoiceService.class);
-            serviceIntent.setAction(DiscordVoiceService.ACTION_START);
-            serviceIntent.putExtra("token", token);
-            serviceIntent.putExtra("ownerId", ownerId);
-            serviceIntent.putExtra("prefix", prefix);
-            serviceIntent.putExtra("channelId", channelId);
-            serviceIntent.putExtra("autoDeaf", checkAutoDeaf.isChecked());
-            serviceIntent.putExtra("autoMute", checkAutoMute.isChecked());
-
-            ContextCompat.startForegroundService(this, serviceIntent);
-            bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE);
-
-            isBotRunning = true;
-            btnStartStop.setText("STOP 24/7 BOT");
-            btnStartStop.setBackgroundColor(0xFFED4245); // Discord Red
-            textStatus.setText("⚡ Connecting to Discord Gateway...");
-            textStatus.setTextColor(0xFFFAA61A);
-            appendLog("[+] Starting 24/7 Background Service...");
-        } else {
-            prefs.edit().putBoolean("bot_started", false).apply();
-            DiscordVoiceService svc = getActiveService();
-            if (svc != null) {
-                svc.stopBotCompletely();
-            }
-
-            if (isBound) {
-                if (service != null) service.setUiListener(null);
-                try {
-                    unbindService(serviceConnection);
-                } catch (Exception ignored) {}
-                isBound = false;
-                service = null;
-            }
-
-            Intent stopIntent = new Intent(this, DiscordVoiceService.class);
-            stopIntent.setAction(DiscordVoiceService.ACTION_STOP);
-            stopService(stopIntent);
-
-            isBotRunning = false;
-            isInVc = false;
-            isCamOn = false;
-            isStreaming = false;
-            btnStartStop.setText("START 24/7 BOT (BACKGROUND)");
-            btnStartStop.setBackgroundColor(0xFF5865F2); // Discord Blurple
-            textStatus.setText("🔴 Status: Stopped");
-            textStatus.setTextColor(0xFFED4245);
-            btnCamera.setText("CAM ON");
-            btnStream.setText("SCREENSHARE");
-            appendLog("[-] 24/7 Service completely turned off.");
-        }
-    }
-
-    private void joinVcClicked() {
-        String chId = editChannelId.getText().toString().trim();
-        if (chId.isEmpty()) {
-            Toast.makeText(this, "Enter Voice Channel ID!", Toast.LENGTH_SHORT).show();
+        if (accounts.isEmpty()) {
+            TextView empty = new TextView(this);
+            empty.setText("No accounts added. Open Accounts tab to add tokens.");
+            empty.setTextColor(Color.parseColor("#949BA4"));
+            empty.setTextSize(11);
+            containerSelectionPills.addView(empty);
+            textSelectionSummary.setText("Selected: None");
             return;
         }
-        saveConfig();
-        DiscordVoiceService svc = getActiveService();
-        if (svc != null && svc.getClient() != null) {
-            appendLog("[+] Joining Voice Channel: " + chId + "...");
-            svc.getClient().joinVoiceChannel(null, chId);
+
+        for (AccountModel acc : accounts) {
+            boolean isChecked = selectedAccountIds.contains(acc.getId());
+            if (isChecked) {
+                selectedNicknames.add(acc.getNickname());
+            }
+
+            CheckBox cb = new CheckBox(this);
+            String label = acc.getNickname() + " (@" + acc.getUsername() + ")" + (acc.isInVc() ? " 🔊" : "");
+            cb.setText(label);
+            cb.setTextColor(Color.WHITE);
+            cb.setTextSize(12);
+            cb.setChecked(isChecked);
+            cb.setOnCheckedChangeListener((buttonView, checked) -> {
+                if (checked) {
+                    selectedAccountIds.add(acc.getId());
+                } else {
+                    selectedAccountIds.remove(acc.getId());
+                }
+                updateSelectionSummaryText();
+            });
+            containerSelectionPills.addView(cb);
+        }
+
+        updateSelectionSummary(selectedNicknames);
+    }
+
+    private void updateSelectionSummaryText() {
+        if (service == null) return;
+        List<String> selectedNicknames = new ArrayList<>();
+        for (AccountModel a : service.getAccountsList()) {
+            if (selectedAccountIds.contains(a.getId())) {
+                selectedNicknames.add(a.getNickname());
+            }
+        }
+        updateSelectionSummary(selectedNicknames);
+    }
+
+    private void updateSelectionSummary(List<String> names) {
+        if (names.isEmpty()) {
+            textSelectionSummary.setText("Selected: None (Check accounts above)");
         } else {
-            Toast.makeText(this, "Tap START 24/7 BOT first!", Toast.LENGTH_SHORT).show();
+            textSelectionSummary.setText("Selected (" + names.size() + "): " + TextUtils.join(", ", names));
         }
     }
 
-    private void leaveVcClicked() {
-        DiscordVoiceService svc = getActiveService();
-        if (svc != null && svc.getClient() != null) {
-            appendLog("[-] Leaving Voice Channel...");
-            svc.getClient().leaveVoiceChannel();
-        }
-    }
+    private void refreshAccountsList(List<AccountModel> accounts) {
+        containerAccountsList.removeAllViews();
 
-    private void toggleMute() {
-        DiscordVoiceService svc = getActiveService();
-        if (svc != null && svc.getClient() != null) {
-            svc.getClient().setMute(!isMuted);
+        if (accounts.isEmpty()) {
+            TextView empty = new TextView(this);
+            empty.setText("No accounts configured yet. Add your Discord token above!");
+            empty.setTextColor(Color.parseColor("#949BA4"));
+            empty.setTextSize(11);
+            empty.setPadding(0, 16, 0, 16);
+            containerAccountsList.addView(empty);
+            return;
         }
-    }
 
-    private void toggleDeaf() {
-        DiscordVoiceService svc = getActiveService();
-        if (svc != null && svc.getClient() != null) {
-            svc.getClient().setDeafen(!isDeafened);
-        }
-    }
+        float density = getResources().getDisplayMetrics().density;
+        int padCard = (int) (12 * density);
+        int marginCard = (int) (10 * density);
 
-    private void toggleCamera() {
-        DiscordVoiceService svc = getActiveService();
-        if (svc != null && svc.getClient() != null) {
-            svc.getClient().setCamera(!isCamOn);
-        }
-    }
+        for (AccountModel acc : accounts) {
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setBackgroundResource(R.drawable.stat_card_bg);
+            card.setPadding(padCard, padCard, padCard, padCard);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.setMargins(0, 0, 0, marginCard);
+            card.setLayoutParams(lp);
 
-    private void toggleStream() {
-        DiscordVoiceService svc = getActiveService();
-        if (svc != null && svc.getClient() != null) {
-            if (isStreaming) {
-                svc.getClient().stopScreenShare();
+            // Row 1: Nickname + Status Badge
+            LinearLayout topRow = new LinearLayout(this);
+            topRow.setOrientation(LinearLayout.HORIZONTAL);
+            topRow.setGravity(Gravity.CENTER_VERTICAL);
+
+            TextView txtNick = new TextView(this);
+            txtNick.setText(acc.getNickname());
+            txtNick.setTextColor(Color.WHITE);
+            txtNick.setTextSize(14);
+            txtNick.setTypeface(null, Typeface.BOLD);
+            LinearLayout.LayoutParams lpNick = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            txtNick.setLayoutParams(lpNick);
+            topRow.addView(txtNick);
+
+            TextView txtBadge = new TextView(this);
+            String st = acc.getStatus();
+            txtBadge.setText(st.toUpperCase());
+            txtBadge.setTextSize(10);
+            txtBadge.setTypeface(null, Typeface.BOLD);
+            txtBadge.setPadding(8, 2, 8, 2);
+            if ("Online".equalsIgnoreCase(st)) {
+                txtBadge.setTextColor(Color.parseColor("#23A55A"));
+            } else if ("Error".equalsIgnoreCase(st)) {
+                txtBadge.setTextColor(Color.parseColor("#F23F43"));
             } else {
-                svc.getClient().startScreenShare();
+                txtBadge.setTextColor(Color.parseColor("#F0B232"));
             }
+            topRow.addView(txtBadge);
+            card.addView(topRow);
+
+            // Row 2: @Username and VC status
+            TextView txtSub = new TextView(this);
+            String vcTxt = acc.isInVc() ? ("🔊 In VC: #" + acc.getChannelId()) : "⚪ Not in voice";
+            txtSub.setText("@" + acc.getUsername() + " • " + vcTxt);
+            txtSub.setTextColor(acc.isInVc() ? Color.parseColor("#23A55A") : Color.parseColor("#949BA4"));
+            txtSub.setTextSize(11);
+            txtSub.setPadding(0, 4, 0, 8);
+            card.addView(txtSub);
+
+            // Row 3: Action buttons
+            LinearLayout actionsRow = new LinearLayout(this);
+            actionsRow.setOrientation(LinearLayout.HORIZONTAL);
+
+            Button btnMute = createSmallButton("🎙️", v -> {
+                if (service != null) service.toggleMute(Collections.singletonList(acc.getId()));
+            });
+            Button btnDeaf = createSmallButton("🎧", v -> {
+                if (service != null) service.toggleDeaf(Collections.singletonList(acc.getId()));
+            });
+            Button btnCam = createSmallButton("📷", v -> {
+                if (service != null) service.toggleCamera(Collections.singletonList(acc.getId()));
+            });
+            Button btnStream = createSmallButton("🖥️", v -> {
+                if (service != null) service.toggleStream(Collections.singletonList(acc.getId()));
+            });
+
+            actionsRow.addView(btnMute);
+            actionsRow.addView(btnDeaf);
+            actionsRow.addView(btnCam);
+            actionsRow.addView(btnStream);
+
+            if (acc.isInVc()) {
+                Button btnLeave = createSmallButton("Leave", v -> {
+                    if (service != null) service.leaveVc(Collections.singletonList(acc.getId()));
+                });
+                btnLeave.setBackgroundResource(R.drawable.btn_red);
+                actionsRow.addView(btnLeave);
+            }
+
+            Button btnRemove = createSmallButton("🗑️", v -> {
+                new AlertDialog.Builder(this)
+                        .setTitle("Remove Account")
+                        .setMessage("Are you sure you want to remove " + acc.getNickname() + "?")
+                        .setPositiveButton("Remove", (dialog, which) -> {
+                            if (service != null) service.removeAccount(acc.getId());
+                        })
+                        .setNegativeButton("Cancel", null)
+                        .show();
+            });
+            btnRemove.setBackgroundResource(R.drawable.btn_red);
+            LinearLayout.LayoutParams lpRemove = (LinearLayout.LayoutParams) btnRemove.getLayoutParams();
+            lpRemove.setMargins((int) (8 * density), 0, 0, 0);
+            actionsRow.addView(btnRemove);
+
+            card.addView(actionsRow);
+            containerAccountsList.addView(card);
         }
     }
 
-    private void requestPermissionsIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS)
-                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                androidx.core.app.ActivityCompat.requestPermissions(
-                        this,
-                        new String[]{android.Manifest.permission.POST_NOTIFICATIONS},
-                        101
-                );
-            }
-        }
-        requestBatteryOptimization();
+    private Button createSmallButton(String text, View.OnClickListener listener) {
+        float density = getResources().getDisplayMetrics().density;
+        int h = (int) (38 * density);
+        int m = (int) (2 * density);
+
+        Button b = new Button(this);
+        b.setText(text);
+        b.setTextSize(11);
+        b.setTextColor(Color.WHITE);
+        b.setBackgroundResource(R.drawable.btn_gray);
+        b.setOnClickListener(listener);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, h, 1f);
+        lp.setMargins(m, 0, m, 0);
+        b.setLayoutParams(lp);
+        return b;
     }
 
-    private void requestBatteryOptimization() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
-            if (pm != null && !pm.isIgnoringBatteryOptimizations(getPackageName())) {
-                Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
-                intent.setData(Uri.parse("package:" + getPackageName()));
-                try {
-                    startActivity(intent);
-                } catch (Exception ignored) {}
+    private void startRamUiTimer() {
+        ramUpdateRunnable = new Runnable() {
+            @Override
+            public void run() {
+                long usedBytes = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
+                long usedMb = usedBytes / (1024 * 1024);
+                String ramStr = "RAM: " + usedMb + "MB / 30MB";
+                textHeaderRam.setText(ramStr);
+                textRamStatus.setText("RAM: " + usedMb + " MB / 30 MB (Auto-Clean Active)");
+
+                if (usedMb >= 26) {
+                    textHeaderRam.setTextColor(Color.parseColor("#F23F43"));
+                } else {
+                    textHeaderRam.setTextColor(Color.parseColor("#23A55A"));
+                }
+                ramUpdateHandler.postDelayed(this, 2000);
             }
-        }
+        };
+        ramUpdateHandler.postDelayed(ramUpdateRunnable, 2000);
     }
 
-    private void appendLog(String msg) {
+    @Override
+    public void onAccountsChanged(List<AccountModel> accounts) {
         runOnUiThread(() -> {
-            textLogs.append(msg + "\n");
-            scrollLogs.post(() -> scrollLogs.fullScroll(View.FOCUS_DOWN));
+            refreshSelectionViews(accounts);
+            refreshAccountsList(accounts);
         });
     }
 
     @Override
     public void onLog(String message) {
-        appendLog(message);
+        runOnUiThread(() -> {
+            textLogs.append(message + "\n");
+            scrollLogs.post(() -> scrollLogs.fullScroll(View.FOCUS_DOWN));
+        });
     }
 
     @Override
-    public void onStatusChanged(String status, boolean connected) {
+    public void onStatsChanged(int total, int online, int inVc) {
         runOnUiThread(() -> {
-            if ("Stopped".equalsIgnoreCase(status) || (!isBotRunning && !connected)) {
-                isBotRunning = false;
-                isInVc = false;
-                textStatus.setText("🔴 Status: Stopped");
-                textStatus.setTextColor(0xFFED4245);
-                btnStartStop.setText("START 24/7 BOT (BACKGROUND)");
-                btnStartStop.setBackgroundColor(0xFF5865F2);
+            textStatTotal.setText(total + "/5");
+            textStatOnline.setText(String.valueOf(online));
+            textStatInVc.setText(String.valueOf(inVc));
+            btnTabAccounts.setText("👥 ACCOUNTS (" + total + "/5)");
+
+            if (total >= DiscordVoiceService.MAX_ACCOUNTS) {
+                btnAddAccount.setEnabled(false);
+                textMaxLimitWarning.setText("Maximum limit (5) accounts reached.");
+                textMaxLimitWarning.setTextColor(Color.parseColor("#F23F43"));
             } else {
-                textStatus.setText("Status: " + status);
-                textStatus.setTextColor(connected ? 0xFF3BA55D : 0xFFFAA61A);
-                if (connected) {
-                    isBotRunning = true;
-                    btnStartStop.setText("STOP 24/7 BOT");
-                    btnStartStop.setBackgroundColor(0xFFED4245);
-                }
+                btnAddAccount.setEnabled(true);
+                textMaxLimitWarning.setText("Tokens are stored locally on your device. Max limit 5 accounts.");
+                textMaxLimitWarning.setTextColor(Color.parseColor("#72767D"));
             }
         });
     }
 
     @Override
-    public void onVoiceStateChanged(String channelId, boolean inVc, boolean muted, boolean deafened, boolean camera, boolean streaming) {
-        this.isInVc = inVc;
-        this.isMuted = muted;
-        this.isDeafened = deafened;
-        this.isCamOn = camera;
-        this.isStreaming = streaming;
-
-        runOnUiThread(() -> {
-            btnMute.setText(muted ? "UNMUTE" : "MUTE");
-            btnDeaf.setText(deafened ? "UNDEAFEN" : "DEAFEN");
-            btnCamera.setText(camera ? "CAM OFF" : "CAM ON");
-            btnStream.setText(streaming ? "STOP STREAM" : "SCREENSHARE");
-            if (inVc) {
-                textStatus.setText("🟢 In VC: " + channelId);
-                textStatus.setTextColor(0xFF3BA55D);
+    protected void onDestroy() {
+        super.onDestroy();
+        if (ramUpdateRunnable != null) {
+            ramUpdateHandler.removeCallbacks(ramUpdateRunnable);
+        }
+        if (isBound) {
+            if (service != null) {
+                service.setUiListener(null);
             }
-        });
+            unbindService(serviceConnection);
+            isBound = false;
+        }
     }
 }

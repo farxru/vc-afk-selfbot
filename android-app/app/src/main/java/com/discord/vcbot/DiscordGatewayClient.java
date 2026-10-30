@@ -4,10 +4,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
@@ -21,31 +19,21 @@ public class DiscordGatewayClient {
     private static final String GATEWAY_URL = "wss://gateway.discord.gg/?v=9&encoding=json";
 
     public interface Listener {
-        void onLog(String message);
-        void onStatusChanged(String status, boolean connected);
-        void onVoiceStateChanged(String channelId, boolean inVc, boolean muted, boolean deafened, boolean camera, boolean streaming);
+        void onLog(String accountId, String message);
+        void onAccountUpdated(AccountModel account);
     }
 
+    private final AccountModel account;
     private final OkHttpClient httpClient;
     private WebSocket webSocket;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private Listener listener;
 
-    private String token;
-    private String ownerId;
-    private String prefix = ".";
     private String targetChannelId = null;
     private String currentGuildId = null;
-    private String currentChannelId = null;
     private String botUserId = null;
-    private String botUsername = null;
 
     private boolean stayInVc = false;
-    private boolean isMuted = false;
-    private boolean isDeafened = true;
-    private boolean isCameraOn = false;
-    private boolean isStreaming = false;
-
     private long heartbeatInterval = 41250;
     private final Handler heartbeatHandler = new Handler(Looper.getMainLooper());
     private Runnable heartbeatRunnable;
@@ -56,13 +44,18 @@ public class DiscordGatewayClient {
     private boolean isRunning = false;
     private int sequenceNumber = -1;
 
-    public DiscordGatewayClient(Listener listener) {
+    public DiscordGatewayClient(String accountId, String token, Listener listener) {
+        this.account = new AccountModel(accountId, token);
         this.listener = listener;
         this.httpClient = new OkHttpClient.Builder()
                 .readTimeout(0, TimeUnit.MILLISECONDS)
                 .pingInterval(30, TimeUnit.SECONDS)
                 .retryOnConnectionFailure(true)
                 .build();
+    }
+
+    public AccountModel getAccount() {
+        return account;
     }
 
     public void setListener(Listener listener) {
@@ -73,49 +66,26 @@ public class DiscordGatewayClient {
         return isRunning;
     }
 
-    public boolean isInVc() {
-        return stayInVc && currentChannelId != null;
-    }
-
-    public String getCurrentChannelId() {
-        return currentChannelId;
-    }
-
-    public boolean isMuted() {
-        return isMuted;
-    }
-
-    public boolean isDeafened() {
-        return isDeafened;
-    }
-
-    public boolean isCameraOn() {
-        return isCameraOn;
-    }
-
-    public boolean isStreaming() {
-        return isStreaming;
-    }
-
-    public void start(String token, String ownerId, String prefix, String targetChannelId, boolean autoDeaf, boolean autoMute) {
+    public void start(String targetChannelId, boolean autoDeaf, boolean autoMute) {
         if (this.isRunning && this.webSocket != null) {
-            log("[!] Bot is already connected to Discord Gateway.");
+            log("[!] Already connected to Discord Gateway.");
             return;
         }
-        this.token = token.trim();
-        this.ownerId = ownerId.trim();
-        this.prefix = (prefix == null || prefix.isEmpty()) ? "." : prefix.trim();
         this.targetChannelId = (targetChannelId != null && !targetChannelId.trim().isEmpty()) ? targetChannelId.trim() : null;
-        this.isDeafened = autoDeaf;
-        this.isMuted = autoMute;
-        this.isCameraOn = false;
-        this.isStreaming = false;
-        this.currentChannelId = null;
+        this.account.setDeafened(autoDeaf);
+        this.account.setMuted(autoMute);
+        this.account.setCameraOn(false);
+        this.account.setStreaming(false);
+        this.account.setInVc(false);
+        this.account.setChannelId(null);
+        this.account.setStatus("Connecting");
+        this.account.setErrorMessage(null);
         this.sequenceNumber = -1;
         this.stayInVc = (this.targetChannelId != null);
         this.isRunning = true;
 
-        log("[+] Connecting to Discord Gateway (v9)...");
+        notifyUpdate();
+        log("[+] Connecting to Discord Gateway...");
         connect();
     }
 
@@ -141,19 +111,19 @@ public class DiscordGatewayClient {
                 stopScreenShare();
             } catch (Exception ignored) {}
             try {
-                webSocket.close(1000, "Bot stopped by user");
+                webSocket.close(1000, "Account stopped by user");
             } catch (Exception ignored) {}
             webSocket = null;
         }
-        currentChannelId = null;
-        currentGuildId = null;
+        account.setInVc(false);
+        account.setChannelId(null);
+        account.setStatus("Stopped");
+        account.setStreaming(false);
+        account.setCameraOn(false);
         targetChannelId = null;
-        sequenceNumber = -1;
-        isCameraOn = false;
-        isStreaming = false;
-        notifyVoiceState(null, false, isMuted, isDeafened, false, false);
-        notifyStatus("Stopped", false);
-        log("[-] Bot completely turned off.");
+        currentGuildId = null;
+        notifyUpdate();
+        log("[-] Account disconnected & stopped.");
     }
 
     private void connect() {
@@ -164,11 +134,12 @@ public class DiscordGatewayClient {
         }
         if (webSocket != null) {
             try {
-                webSocket.close(1000, "Opening fresh socket");
+                webSocket.close(1000, "Resetting socket");
             } catch (Exception ignored) {}
             webSocket = null;
         }
-        notifyStatus("Connecting...", false);
+        account.setStatus("Connecting");
+        notifyUpdate();
 
         Request request = new Request.Builder()
                 .url(GATEWAY_URL)
@@ -178,7 +149,7 @@ public class DiscordGatewayClient {
         webSocket = httpClient.newWebSocket(request, new WebSocketListener() {
             @Override
             public void onOpen(WebSocket ws, Response response) {
-                log("[+] WebSocket connection established. Awaiting HELLO...");
+                log("[+] WebSocket connected. Awaiting HELLO...");
             }
 
             @Override
@@ -187,29 +158,30 @@ public class DiscordGatewayClient {
             }
 
             @Override
-            public void onClosing(WebSocket ws, int code, String reason) {
-                log("[!] Gateway closing: " + code + " / " + reason);
-            }
-
-            @Override
             public void onClosed(WebSocket ws, int code, String reason) {
-                log("[-] Gateway closed: " + code + " / " + reason);
+                log("[-] Gateway closed (" + code + ")");
                 if (isRunning) {
-                    notifyStatus("Disconnected", false);
+                    account.setStatus("Connecting");
+                    notifyUpdate();
                     scheduleReconnect(2000);
                 } else {
-                    notifyStatus("Stopped", false);
+                    account.setStatus("Stopped");
+                    notifyUpdate();
                 }
             }
 
             @Override
             public void onFailure(WebSocket ws, Throwable t, Response response) {
-                log("[!] Gateway connection error: " + (t != null ? t.getMessage() : "Unknown error"));
+                String err = (t != null ? t.getMessage() : "Connection failed");
+                log("[!] Gateway error: " + err);
                 if (isRunning) {
-                    notifyStatus("Network Error", false);
-                    scheduleReconnect(2500);
+                    account.setStatus("Error");
+                    account.setErrorMessage(err);
+                    notifyUpdate();
+                    scheduleReconnect(3000);
                 } else {
-                    notifyStatus("Stopped", false);
+                    account.setStatus("Stopped");
+                    notifyUpdate();
                 }
             }
         });
@@ -222,7 +194,6 @@ public class DiscordGatewayClient {
             mainHandler.removeCallbacks(reconnectRunnable);
             reconnectRunnable = null;
         }
-        log("[!] Reconnecting to Discord Gateway in " + (delayMs / 1000.0) + "s...");
         reconnectRunnable = () -> {
             reconnectRunnable = null;
             if (isRunning) {
@@ -238,7 +209,8 @@ public class DiscordGatewayClient {
             @Override
             public void run() {
                 if (isRunning && stayInVc && targetChannelId != null && !targetChannelId.isEmpty()) {
-                    if (currentChannelId == null || !currentChannelId.equals(targetChannelId)) {
+                    String cur = account.getChannelId();
+                    if (cur == null || !cur.equals(targetChannelId)) {
                         log("[Watchdog] Missing from target VC #" + targetChannelId + ". Auto-rejoining...");
                         joinVoiceChannel(currentGuildId, targetChannelId);
                     }
@@ -268,26 +240,24 @@ public class DiscordGatewayClient {
                 case 10: // HELLO
                     JSONObject d = json.getJSONObject("d");
                     heartbeatInterval = d.getLong("heartbeat_interval");
-                    log("[+] Received HELLO (Heartbeat interval: " + heartbeatInterval + "ms)");
                     startHeartbeat(heartbeatInterval);
                     sendIdentify();
                     break;
 
                 case 11: // HEARTBEAT_ACK
-                    // Normal heartbeat acknowledgment
                     break;
 
                 case 0: // DISPATCH
                     handleDispatch(json.optString("t"), json.optJSONObject("d"));
                     break;
 
-                case 1: // Discord requested immediate heartbeat
+                case 1:
                     sendHeartbeat();
                     break;
 
-                case 7: // RECONNECT
-                case 9: // INVALID_SESSION
-                    log("[!] Gateway requested reconnect (OP " + op + ")");
+                case 7:
+                case 9:
+                    log("[!] Reconnect requested by Discord (OP " + op + ")");
                     if (webSocket != null) webSocket.close(4000, "Reconnect requested");
                     break;
             }
@@ -303,95 +273,35 @@ public class DiscordGatewayClient {
             try {
                 JSONObject user = d.getJSONObject("user");
                 botUserId = user.getString("id");
-                String username = user.optString("username", "User");
+                account.setUserId(botUserId);
+                String un = user.optString("username", "User");
                 String disc = user.optString("discriminator", "0");
-                botUsername = disc.equals("0") ? username : (username + "#" + disc);
-                log("[+] Successfully logged in as: " + botUsername + " (" + botUserId + ")");
-                notifyStatus("Ready (" + botUsername + ")", true);
+                String fullTag = disc.equals("0") ? un : (un + "#" + disc);
+                account.setUsername(fullTag);
+
+                String globalName = user.optString("global_name", "");
+                if (globalName != null && !globalName.trim().isEmpty()) {
+                    account.setNickname(globalName.trim());
+                } else {
+                    account.setNickname(un);
+                }
+
+                account.setStatus("Online");
+                account.setErrorMessage(null);
+                log("[+] Ready: " + account.getNickname() + " (" + fullTag + ")");
+                notifyUpdate();
 
                 // Auto-join configured target voice channel
                 if (targetChannelId != null && !targetChannelId.isEmpty()) {
-                    log("[+] Auto-joining target Voice Channel: " + targetChannelId);
                     joinVoiceChannel(null, targetChannelId);
-                } else if (stayInVc && currentChannelId != null) {
-                    sendVoiceStateUpdate(currentGuildId, currentChannelId, isMuted, isDeafened, isCameraOn);
+                } else if (stayInVc && account.getChannelId() != null) {
+                    sendVoiceStateUpdate(currentGuildId, account.getChannelId(), account.isMuted(), account.isDeafened(), account.isCameraOn());
                 }
             } catch (Exception e) {
                 log("[!] Error parsing READY event: " + e.getMessage());
             }
-        } else if ("MESSAGE_CREATE".equals(event)) {
-            handleOwnerCommands(d);
         } else if ("VOICE_STATE_UPDATE".equals(event)) {
             handleVoiceStateUpdate(d);
-        }
-    }
-
-    private void handleOwnerCommands(JSONObject d) {
-        try {
-            JSONObject author = d.optJSONObject("author");
-            if (author == null) return;
-            String authorId = author.optString("id");
-
-            // Strict owner check: only owner ID or bot self
-            boolean isOwner = authorId.equals(ownerId) || (botUserId != null && authorId.equals(botUserId));
-            if (!isOwner) return;
-
-            String content = d.optString("content", "").trim();
-            if (!content.startsWith(prefix)) return;
-
-            String[] parts = content.substring(prefix.length()).trim().split("\\s+");
-            if (parts.length == 0) return;
-            String cmd = parts[0].toLowerCase();
-
-            switch (cmd) {
-                case "jvc":
-                    if (parts.length > 1) {
-                        String chId = parts[1].replaceAll("[<#>]", "");
-                        String guildId = d.optString("guild_id", null);
-                        joinVoiceChannel(guildId, chId);
-                    }
-                    break;
-
-                case "lvc":
-                    leaveVoiceChannel();
-                    break;
-
-                case "mute":
-                    setMute(true);
-                    break;
-
-                case "unmute":
-                    setMute(false);
-                    break;
-
-                case "deaf":
-                case "deafen":
-                    setDeafen(true);
-                    break;
-
-                case "undeaf":
-                case "undeafen":
-                    setDeafen(false);
-                    break;
-
-                case "cam":
-                    setCamera(true);
-                    break;
-
-                case "camoff":
-                    setCamera(false);
-                    break;
-
-                case "ss":
-                    startScreenShare();
-                    break;
-
-                case "ssoff":
-                    stopScreenShare();
-                    break;
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error handling command", e);
         }
     }
 
@@ -401,18 +311,19 @@ public class DiscordGatewayClient {
             if (botUserId != null && botUserId.equals(userId)) {
                 String chId = d.optString("channel_id", null);
                 if (chId != null && !chId.equals("null") && !chId.isEmpty()) {
-                    currentChannelId = chId;
+                    account.setChannelId(chId);
+                    account.setInVc(true);
                     String gId = d.optString("guild_id", null);
                     if (gId != null && !gId.isEmpty() && !gId.equals("null")) {
                         currentGuildId = gId;
                     }
-                    isMuted = d.optBoolean("self_mute", false);
-                    isDeafened = d.optBoolean("self_deaf", false);
-                    isCameraOn = d.optBoolean("self_video", false);
+                    account.setMuted(d.optBoolean("self_mute", false));
+                    account.setDeafened(d.optBoolean("self_deaf", false));
+                    account.setCameraOn(d.optBoolean("self_video", false));
 
-                    // Check if account was moved or joined a different voice channel (e.g. from main Discord app)
+                    // Re-enforce target VC if shifted to another channel
                     if (stayInVc && targetChannelId != null && !targetChannelId.isEmpty() && !chId.equals(targetChannelId)) {
-                        log("[!] Account joined different channel (" + chId + "). Re-asserting target VC: " + targetChannelId);
+                        log("[!] Voice shifted to " + chId + ". Re-asserting target VC: " + targetChannelId);
                         if (rejoinRunnable != null) {
                             mainHandler.removeCallbacks(rejoinRunnable);
                         }
@@ -427,15 +338,16 @@ public class DiscordGatewayClient {
                     }
 
                     stayInVc = true;
-                    log("[+] Verified 24/7 Presence in VC: " + chId + (isMuted ? " [Muted]" : "") + (isDeafened ? " [Deaf]" : ""));
-                    notifyVoiceState(chId, true, isMuted, isDeafened, isCameraOn, isStreaming);
+                    log("[+] In VC #" + chId + (account.isMuted() ? " [Muted]" : "") + (account.isDeafened() ? " [Deaf]" : ""));
+                    notifyUpdate();
                 } else if (stayInVc) {
-                    // Bot was kicked, disconnected by admin, or disconnected via main Discord
-                    String channelToRejoin = (targetChannelId != null && !targetChannelId.isEmpty()) ? targetChannelId : currentChannelId;
+                    // Disconnected or kicked from VC
+                    String channelToRejoin = (targetChannelId != null && !targetChannelId.isEmpty()) ? targetChannelId : account.getChannelId();
                     if (channelToRejoin != null && !channelToRejoin.isEmpty()) {
-                        log("[!] Kicked or disconnected from VC! Auto-rejoining #" + channelToRejoin + " in 1s...");
-                        currentChannelId = null;
-                        notifyVoiceState(null, false, isMuted, isDeafened, false, false);
+                        log("[!] Disconnected from VC. Auto-rejoining in 1s...");
+                        account.setInVc(false);
+                        account.setChannelId(null);
+                        notifyUpdate();
                         if (rejoinRunnable != null) {
                             mainHandler.removeCallbacks(rejoinRunnable);
                         }
@@ -460,23 +372,22 @@ public class DiscordGatewayClient {
         String gId = (guildId != null && !guildId.trim().isEmpty()) ? guildId.trim() : this.currentGuildId;
         if (gId != null && !gId.isEmpty()) {
             this.currentGuildId = gId;
-            this.currentChannelId = channelId.trim();
-            log("[+] Joining Voice Channel: " + channelId + " (Guild: " + gId + ")");
-            sendVoiceStateUpdate(currentGuildId, currentChannelId, isMuted, isDeafened, isCameraOn);
-            notifyVoiceState(channelId, true, isMuted, isDeafened, isCameraOn, isStreaming);
+            account.setChannelId(channelId.trim());
+            account.setInVc(true);
+            log("[+] Joining VC: #" + channelId + " (Guild: " + gId + ")");
+            sendVoiceStateUpdate(currentGuildId, channelId.trim(), account.isMuted(), account.isDeafened(), account.isCameraOn());
+            notifyUpdate();
             startVoiceWatchdog();
             return;
         }
 
-        // Guild ID missing: Auto-resolve via Discord REST API in <200ms
-        log("[+] Resolving Guild ID for Voice Channel: " + channelId + "...");
+        // Resolve guild ID via REST API
         new Thread(() -> {
             String resolvedGuildId = null;
-            String channelName = channelId;
             try {
                 Request req = new Request.Builder()
                         .url("https://discord.com/api/v9/channels/" + channelId)
-                        .addHeader("Authorization", token)
+                        .addHeader("Authorization", account.getToken())
                         .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
                         .build();
 
@@ -485,24 +396,17 @@ public class DiscordGatewayClient {
                         String body = resp.body().string();
                         JSONObject json = new JSONObject(body);
                         resolvedGuildId = json.optString("guild_id", null);
-                        channelName = json.optString("name", channelId);
-                        log("[+] Found Voice Channel: #" + channelName + " in Guild: " + resolvedGuildId);
-                    } else {
-                        log("[!] Channel API lookup returned code: " + resp.code());
                     }
                 }
-            } catch (Exception e) {
-                log("[!] Error resolving channel guild: " + e.getMessage());
-            }
+            } catch (Exception ignored) {}
 
             final String finalGuildId = resolvedGuildId;
-            final String finalChannelName = channelName;
             mainHandler.post(() -> {
                 this.currentGuildId = finalGuildId;
-                this.currentChannelId = channelId;
-                log("[+] Sending Voice State Update for #" + finalChannelName);
-                sendVoiceStateUpdate(finalGuildId, channelId, isMuted, isDeafened, isCameraOn);
-                notifyVoiceState(channelId, true, isMuted, isDeafened, isCameraOn, isStreaming);
+                account.setChannelId(channelId);
+                account.setInVc(true);
+                sendVoiceStateUpdate(finalGuildId, channelId, account.isMuted(), account.isDeafened(), account.isCameraOn());
+                notifyUpdate();
                 startVoiceWatchdog();
             });
         }).start();
@@ -516,55 +420,57 @@ public class DiscordGatewayClient {
             rejoinRunnable = null;
         }
         stopScreenShare();
-        isCameraOn = false;
-        log("[-] Leaving Voice Channel: " + currentChannelId);
+        account.setCameraOn(false);
+        account.setInVc(false);
+        account.setChannelId(null);
+        log("[-] Left VC");
         if (currentGuildId != null && !currentGuildId.isEmpty()) {
             sendVoiceStateUpdate(currentGuildId, null, false, false, false);
         }
         sendVoiceStateUpdate(null, null, false, false, false);
-        currentChannelId = null;
-        notifyVoiceState(null, false, isMuted, isDeafened, false, false);
+        notifyUpdate();
     }
 
     public void setMute(boolean mute) {
-        this.isMuted = mute;
-        sendVoiceStateUpdate(currentGuildId, currentChannelId, isMuted, isDeafened, isCameraOn);
-        log(mute ? "[+] Muted in VC" : "[+] Unmuted in VC");
-        notifyVoiceState(currentChannelId, currentChannelId != null, isMuted, isDeafened, isCameraOn, isStreaming);
+        account.setMuted(mute);
+        sendVoiceStateUpdate(currentGuildId, account.getChannelId(), mute, account.isDeafened(), account.isCameraOn());
+        log(mute ? "[+] Muted" : "[+] Unmuted");
+        notifyUpdate();
     }
 
     public void setDeafen(boolean deaf) {
-        this.isDeafened = deaf;
-        sendVoiceStateUpdate(currentGuildId, currentChannelId, isMuted, isDeafened, isCameraOn);
-        log(deaf ? "[+] Deafened in VC" : "[+] Undeafened in VC");
-        notifyVoiceState(currentChannelId, currentChannelId != null, isMuted, isDeafened, isCameraOn, isStreaming);
+        account.setDeafened(deaf);
+        sendVoiceStateUpdate(currentGuildId, account.getChannelId(), account.isMuted(), deaf, account.isCameraOn());
+        log(deaf ? "[+] Deafened" : "[+] Undeafened");
+        notifyUpdate();
     }
 
     public void setCamera(boolean camera) {
-        this.isCameraOn = camera;
-        sendVoiceStateUpdate(currentGuildId, currentChannelId, isMuted, isDeafened, isCameraOn);
-        log(camera ? "[+] Camera turned ON in VC" : "[-] Camera turned OFF in VC");
-        notifyVoiceState(currentChannelId, currentChannelId != null, isMuted, isDeafened, isCameraOn, isStreaming);
+        account.setCameraOn(camera);
+        sendVoiceStateUpdate(currentGuildId, account.getChannelId(), account.isMuted(), account.isDeafened(), camera);
+        log(camera ? "[+] Camera ON" : "[-] Camera OFF");
+        notifyUpdate();
     }
 
     public void startScreenShare() {
-        if (currentChannelId == null) {
+        String chId = account.getChannelId();
+        if (chId == null) {
             log("[-] Cannot start screenshare: Not connected to VC.");
             return;
         }
         try {
-            isStreaming = true;
+            account.setStreaming(true);
             String streamKey = currentGuildId != null
-                    ? "guild:" + currentGuildId + ":" + currentChannelId + ":" + botUserId
-                    : "call:" + currentChannelId + ":" + botUserId;
+                    ? "guild:" + currentGuildId + ":" + chId + ":" + botUserId
+                    : "call:" + chId + ":" + botUserId;
 
             // Opcode 18: STREAM_CREATE
             JSONObject op18 = new JSONObject();
             op18.put("op", 18);
             JSONObject d18 = new JSONObject();
             d18.put("type", currentGuildId != null ? "guild" : "call");
-            d18.put("guild_id", currentGuildId);
-            d18.put("channel_id", currentChannelId);
+            d18.put("guild_id", currentGuildId != null ? currentGuildId : JSONObject.NULL);
+            d18.put("channel_id", chId);
             d18.put("preferred_region", JSONObject.NULL);
             op18.put("d", d18);
             sendJson(op18);
@@ -578,20 +484,21 @@ public class DiscordGatewayClient {
             op22.put("d", d22);
             sendJson(op22);
 
-            log("[+] Screenshare started in VC!");
-            notifyVoiceState(currentChannelId, true, isMuted, isDeafened, isCameraOn, true);
+            log("[+] Screenshare started");
+            notifyUpdate();
         } catch (Exception e) {
-            log("[-] Error starting screenshare: " + e.getMessage());
+            log("[-] Error starting stream: " + e.getMessage());
         }
     }
 
     public void stopScreenShare() {
-        if (!isStreaming) return;
+        if (!account.isStreaming()) return;
         try {
-            isStreaming = false;
+            account.setStreaming(false);
+            String chId = account.getChannelId();
             String streamKey = currentGuildId != null
-                    ? "guild:" + currentGuildId + ":" + currentChannelId + ":" + botUserId
-                    : "call:" + currentChannelId + ":" + botUserId;
+                    ? "guild:" + currentGuildId + ":" + chId + ":" + botUserId
+                    : "call:" + chId + ":" + botUserId;
 
             // Opcode 19: STREAM_DELETE
             JSONObject op19 = new JSONObject();
@@ -601,81 +508,48 @@ public class DiscordGatewayClient {
             op19.put("d", d19);
             sendJson(op19);
 
-            log("[-] Stopped screenshare in VC.");
-            notifyVoiceState(currentChannelId, currentChannelId != null, isMuted, isDeafened, isCameraOn, false);
-        } catch (Exception e) {
-            log("[-] Error stopping screenshare: " + e.getMessage());
-        }
+            log("[-] Screenshare stopped");
+            notifyUpdate();
+        } catch (Exception ignored) {}
     }
 
     private void sendVoiceStateUpdate(String guildId, String channelId, boolean mute, boolean deaf, boolean video) {
         try {
-            JSONObject op4 = new JSONObject();
-            op4.put("op", 4);
             JSONObject d = new JSONObject();
-            d.put("guild_id", guildId != null ? guildId : JSONObject.NULL);
-            d.put("channel_id", channelId != null ? channelId : JSONObject.NULL);
+            d.put("guild_id", (guildId != null && !guildId.equals("null")) ? guildId : JSONObject.NULL);
+            d.put("channel_id", (channelId != null && !channelId.equals("null")) ? channelId : JSONObject.NULL);
             d.put("self_mute", mute);
             d.put("self_deaf", deaf);
             d.put("self_video", video);
             d.put("flags", 2);
-            op4.put("d", d);
-            sendJson(op4);
+
+            JSONObject packet = new JSONObject();
+            packet.put("op", 4);
+            packet.put("d", d);
+            sendJson(packet);
         } catch (Exception e) {
-            log("[!] Error sending VoiceStateUpdate: " + e.getMessage());
+            Log.e(TAG, "Error sending VoiceStateUpdate", e);
         }
     }
 
     private void sendIdentify() {
         try {
-            JSONObject identify = new JSONObject();
-            identify.put("op", 2);
-
-            JSONObject d = new JSONObject();
-            d.put("token", token);
-            d.put("capabilities", 0);
-
-            // Valid Discord Client properties for user accounts (selfbots)
             JSONObject props = new JSONObject();
             props.put("os", "Windows");
             props.put("browser", "Discord Client");
-            props.put("release_channel", "stable");
-            props.put("client_version", "1.0.9210");
-            props.put("os_version", "10.0.19044");
-            props.put("os_arch", "x64");
-            props.put("app_arch", "x64");
-            props.put("system_locale", "en-US");
-            props.put("has_client_mods", false);
-            props.put("client_launch_id", UUID.randomUUID().toString());
-            props.put("browser_user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9210 Chrome/134.0.6998.205 Electron/35.3.0 Safari/537.36");
-            props.put("browser_version", "35.3.0");
-            props.put("os_sdk_version", "19044");
-            props.put("client_build_number", 455964);
-            props.put("native_build_number", 69976);
-            props.put("client_event_source", JSONObject.NULL);
-            props.put("launch_signature", UUID.randomUUID().toString());
-            props.put("client_heartbeat_session_id", UUID.randomUUID().toString());
-            props.put("client_app_state", "focused");
+            props.put("device", "Discord Client");
 
+            JSONObject d = new JSONObject();
+            d.put("token", account.getToken());
+            d.put("capabilities", 8189);
             d.put("properties", props);
-            d.put("compress", false);
 
-            JSONObject clientState = new JSONObject();
-            clientState.put("guild_versions", new JSONObject());
-            d.put("client_state", clientState);
-
-            JSONObject presence = new JSONObject();
-            presence.put("status", "online");
-            presence.put("since", 0);
-            presence.put("afk", false);
-            presence.put("activities", new JSONArray());
-            d.put("presence", presence);
-
-            identify.put("d", d);
-            sendJson(identify);
-            log("[+] Sent Identify payload. Authenticating...");
+            JSONObject packet = new JSONObject();
+            packet.put("op", 2);
+            packet.put("d", d);
+            sendJson(packet);
         } catch (Exception e) {
-            log("[!] Error sending Identify: " + e.getMessage());
+            Log.e(TAG, "Error sending IDENTIFY", e);
         }
     }
 
@@ -688,7 +562,7 @@ public class DiscordGatewayClient {
                 heartbeatHandler.postDelayed(this, heartbeatInterval);
             }
         };
-        heartbeatHandler.postDelayed(heartbeatRunnable, (long) (intervalMs * 0.9));
+        heartbeatHandler.postDelayed(heartbeatRunnable, intervalMs);
     }
 
     private void stopHeartbeat() {
@@ -700,10 +574,10 @@ public class DiscordGatewayClient {
 
     private void sendHeartbeat() {
         try {
-            JSONObject hb = new JSONObject();
-            hb.put("op", 1);
-            hb.put("d", sequenceNumber >= 0 ? sequenceNumber : JSONObject.NULL);
-            sendJson(hb);
+            JSONObject packet = new JSONObject();
+            packet.put("op", 1);
+            packet.put("d", sequenceNumber >= 0 ? sequenceNumber : JSONObject.NULL);
+            sendJson(packet);
         } catch (Exception ignored) {}
     }
 
@@ -714,21 +588,14 @@ public class DiscordGatewayClient {
     }
 
     private void log(String msg) {
-        Log.d(TAG, msg);
         if (listener != null) {
-            mainHandler.post(() -> listener.onLog(msg));
+            listener.onLog(account.getId(), "[" + account.getNickname() + "] " + msg);
         }
     }
 
-    private void notifyStatus(String status, boolean connected) {
+    private void notifyUpdate() {
         if (listener != null) {
-            mainHandler.post(() -> listener.onStatusChanged(status, connected));
-        }
-    }
-
-    private void notifyVoiceState(String channelId, boolean inVc, boolean muted, boolean deaf, boolean cam, boolean stream) {
-        if (listener != null) {
-            mainHandler.post(() -> listener.onVoiceStateChanged(channelId, inVc, muted, deaf, cam, stream));
+            listener.onAccountUpdated(account);
         }
     }
 }
