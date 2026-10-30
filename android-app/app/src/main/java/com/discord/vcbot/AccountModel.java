@@ -68,3 +68,4 @@ public class AccountModel {
     public boolean isStreaming() { return isStreaming; }
     public void setStreaming(boolean streaming) { isStreaming = streaming; }
 }
+
