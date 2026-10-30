@@ -572,6 +572,37 @@ function createDashboard(botState, actions, port = 3000) {
           });
         }
 
+        // Update selected toggle buttons (Red when active, normal/gray when inactive)
+        const selectedAccs = data.accounts.filter(a => selectedAccountIds.has(a.id));
+        const anyMuted = selectedAccs.some(a => a.voice.isMuted);
+        const anyDeaf = selectedAccs.some(a => a.voice.isDeafened);
+        const anyCam = selectedAccs.some(a => a.voice.isCamOn);
+        const anyStream = selectedAccs.some(a => a.voice.isStreaming);
+
+        const btnMute = document.getElementById('btnToggleMute');
+        if (btnMute) {
+          btnMute.className = 'btn ' + (anyMuted ? 'btn-red' : 'btn-gray');
+          btnMute.textContent = anyMuted ? '🎙️ Muted' : '🎙️ Mute';
+        }
+
+        const btnDeaf = document.getElementById('btnToggleDeaf');
+        if (btnDeaf) {
+          btnDeaf.className = 'btn ' + (anyDeaf ? 'btn-red' : 'btn-gray');
+          btnDeaf.textContent = anyDeaf ? '🎧 Deafened' : '🎧 Deafen';
+        }
+
+        const btnCam = document.getElementById('btnToggleCam');
+        if (btnCam) {
+          btnCam.className = 'btn ' + (anyCam ? 'btn-red' : 'btn-gray');
+          btnCam.textContent = anyCam ? '📷 Cam On' : '📷 Cam Off';
+        }
+
+        const btnStream = document.getElementById('btnToggleStream');
+        if (btnStream) {
+          btnStream.className = 'btn ' + (anyStream ? 'btn-red' : 'btn-gray');
+          btnStream.textContent = anyStream ? '🖥️ Stream On' : '🖥️ Screenshare';
+        }
+
         // Render Selection Pills on Control Tab
         renderSelections();
 
@@ -636,12 +667,12 @@ function createDashboard(botState, actions, port = 3000) {
             <span class="acc-chip \${acc.voice.isStreaming ? 'acc-chip-active' : ''}">\${acc.voice.isStreaming ? '🖥️ Streaming' : '🖥️ No Stream'}</span>
           </div>
 
-          <!-- Actions per account -->
+          <!-- Actions per account (Red when active, normal/gray when inactive) -->
           <div class="acc-actions">
-            <button class="btn btn-gray btn-sm" onclick="apiPost('toggleMute', { accountId: '\${acc.id}' })">🎙️</button>
-            <button class="btn btn-gray btn-sm" onclick="apiPost('toggleDeaf', { accountId: '\${acc.id}' })">🎧</button>
-            <button class="btn btn-gray btn-sm" onclick="apiPost('toggleCam', { accountId: '\${acc.id}' })">📷</button>
-            <button class="btn btn-gray btn-sm" onclick="apiPost('toggleStream', { accountId: '\${acc.id}' })">🖥️</button>
+            <button class="btn \${acc.voice.isMuted ? 'btn-red' : 'btn-gray'} btn-sm" onclick="apiPost('toggleMute', { accountId: '\${acc.id}' })">🎙️</button>
+            <button class="btn \${acc.voice.isDeafened ? 'btn-red' : 'btn-gray'} btn-sm" onclick="apiPost('toggleDeaf', { accountId: '\${acc.id}' })">🎧</button>
+            <button class="btn \${acc.voice.isCamOn ? 'btn-red' : 'btn-gray'} btn-sm" onclick="apiPost('toggleCam', { accountId: '\${acc.id}' })">📷</button>
+            <button class="btn \${acc.voice.isStreaming ? 'btn-red' : 'btn-gray'} btn-sm" onclick="apiPost('toggleStream', { accountId: '\${acc.id}' })">🖥️</button>
             \${acc.voice.inVc ? \`<button class="btn btn-red btn-sm" onclick="apiPost('leaveVc', { accountId: '\${acc.id}' })">Leave VC</button>\` : ''}
             <button class="btn btn-red btn-sm" style="margin-left: auto;" onclick="if(confirm('Remove account \${escapeHtml(acc.nickname)}?')) apiPost('removeAccount', { accountId: '\${acc.id}' })">🗑️ Remove</button>
           </div>

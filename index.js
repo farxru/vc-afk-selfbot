@@ -636,13 +636,15 @@ try {
       }
 
       if (action === 'addAccount') {
-        const token = data.token?.trim();
+        let token = (data.token || '').trim();
+        token = token.replace(/^["']+|["']+$/g, '').trim();
         if (!token) throw new Error('Token is required');
         if (accounts.size >= MAX_ACCOUNTS) {
           throw new Error(`Maximum limit of ${MAX_ACCOUNTS} accounts reached`);
         }
         for (const acc of accounts.values()) {
-          if (acc.token === token) throw new Error('Account with this token is already added');
+          const accToken = acc.token.replace(/^["']+|["']+$/g, '').trim();
+          if (accToken === token) throw new Error('Account with this token is already added');
         }
         const acc = addAccount(token);
         config.tokens = Array.from(accounts.values()).map((a) => a.token).slice(0, MAX_ACCOUNTS);

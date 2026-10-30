@@ -30,6 +30,13 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
     public static final int NOTIFICATION_ID = 1001;
     public static final int MAX_ACCOUNTS = 5;
 
+    public enum AddAccountResult {
+        SUCCESS,
+        EMPTY_TOKEN,
+        LIMIT_REACHED,
+        ALREADY_EXISTS
+    }
+
     public interface UiListener {
         void onAccountsChanged(List<AccountModel> accounts);
         void onLog(String message);
@@ -65,6 +72,18 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
         public DiscordVoiceService getService() {
             return DiscordVoiceService.this;
         }
+    }
+
+    public static String sanitizeToken(String raw) {
+        if (raw == null) return "";
+        String t = raw.trim();
+        while ((t.startsWith("\"") && t.endsWith("\"")) || (t.startsWith("'") && t.endsWith("'"))) {
+            if (t.length() <= 2) return "";
+            t = t.substring(1, t.length() - 1).trim();
+        }
+        if (t.startsWith("Bot ")) t = t.substring(4).trim();
+        if (t.startsWith("Bearer ")) t = t.substring(7).trim();
+        return t;
     }
 
     @Override
@@ -117,6 +136,13 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
     }
 
     private void loadSavedAccounts() {
+        synchronized (clients) {
+            for (DiscordGatewayClient c : clients.values()) {
+                c.stop();
+            }
+            clients.clear();
+        }
+
         String tokensJson = prefs.getString("pref_tokens_json", null);
         List<String> tokens = new ArrayList<>();
 
@@ -124,19 +150,24 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
             try {
                 JSONArray arr = new JSONArray(tokensJson);
                 for (int i = 0; i < arr.length() && i < MAX_ACCOUNTS; i++) {
-                    String t = arr.getString(i).trim();
+                    String t = sanitizeToken(arr.getString(i));
                     if (!t.isEmpty() && !tokens.contains(t)) {
                         tokens.add(t);
                     }
                 }
             } catch (Exception ignored) {}
         } else {
-            // Backward compatibility
-            String singleToken = prefs.getString("pref_token", null);
-            if (singleToken != null && !singleToken.trim().isEmpty()) {
-                tokens.add(singleToken.trim());
+            String singleToken = sanitizeToken(prefs.getString("pref_token", null));
+            if (!singleToken.isEmpty()) {
+                tokens.add(singleToken);
             }
         }
+
+        JSONArray cleanArr = new JSONArray();
+        for (String t : tokens) {
+            cleanArr.put(t);
+        }
+        prefs.edit().putString("pref_tokens_json", cleanArr.toString()).apply();
 
         String targetChannel = prefs.getString("pref_channel_id", null);
         boolean autoDeaf = prefs.getBoolean("pref_auto_deaf", true);
@@ -154,30 +185,32 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
         JSONArray arr = new JSONArray();
         synchronized (clients) {
             for (DiscordGatewayClient c : clients.values()) {
-                arr.put(c.getAccount().getToken());
+                arr.put(sanitizeToken(c.getAccount().getToken()));
             }
         }
         prefs.edit().putString("pref_tokens_json", arr.toString()).apply();
     }
 
-    public boolean addAccount(String token, String targetChannel, boolean autoDeaf, boolean autoMute) {
-        if (token == null || token.trim().isEmpty()) return false;
-        String trimmedToken = token.trim();
+    public AddAccountResult addAccount(String rawToken, String targetChannel, boolean autoDeaf, boolean autoMute) {
+        String token = sanitizeToken(rawToken);
+        if (token.isEmpty()) {
+            return AddAccountResult.EMPTY_TOKEN;
+        }
 
         synchronized (clients) {
             if (clients.size() >= MAX_ACCOUNTS) {
                 appendLog("[!] Maximum limit of " + MAX_ACCOUNTS + " accounts reached.");
-                return false;
+                return AddAccountResult.LIMIT_REACHED;
             }
             for (DiscordGatewayClient c : clients.values()) {
-                if (c.getAccount().getToken().equals(trimmedToken)) {
-                    appendLog("[!] Account with this token already exists.");
-                    return false;
+                if (sanitizeToken(c.getAccount().getToken()).equals(token)) {
+                    appendLog("[!] Account with this token already exists (" + c.getAccount().getNickname() + ").");
+                    return AddAccountResult.ALREADY_EXISTS;
                 }
             }
 
             String accId = "acc_" + (accountCounter++);
-            DiscordGatewayClient client = new DiscordGatewayClient(accId, trimmedToken, this);
+            DiscordGatewayClient client = new DiscordGatewayClient(accId, token, this);
             clients.put(accId, client);
             saveTokens();
             client.start(targetChannel, autoDeaf, autoMute);
@@ -186,7 +219,7 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
         notifyAccountsChanged();
         notifyStats();
         cleanRam("Account added");
-        return true;
+        return AddAccountResult.SUCCESS;
     }
 
     public void removeAccount(String accountId) {
@@ -221,7 +254,6 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
 
         if (targetClients.isEmpty()) return;
 
-        // Stagger joins by 250ms to prevent gateway rate-limits / glitching
         for (int i = 0; i < targetClients.size(); i++) {
             final DiscordGatewayClient c = targetClients.get(i);
             long delay = i * 250L;
@@ -294,7 +326,6 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
         long beforeBytes = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
         long beforeMb = beforeBytes / (1024 * 1024);
 
-        // Limit log entries to keep memory tight
         synchronized (logHistory) {
             while (logHistory.size() > 50) {
                 logHistory.remove(0);
@@ -314,7 +345,6 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
             public void run() {
                 long usedBytes = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
                 long usedMb = usedBytes / (1024 * 1024);
-                // Whenever RAM touches 28-30MB, clean it automatically
                 if (usedMb >= 28) {
                     cleanRam("Auto-Clean >= 30MB");
                 }

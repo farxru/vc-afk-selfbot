@@ -190,20 +190,36 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
 
         // Add Account
         btnAddAccount.setOnClickListener(v -> {
-            String token = editNewToken.getText().toString().trim();
-            if (token.isEmpty()) {
+            String token = editNewToken.getText().toString();
+            if (token == null || token.trim().isEmpty()) {
                 Toast.makeText(this, "Please paste a Discord user token", Toast.LENGTH_SHORT).show();
                 return;
             }
             if (service != null) {
                 String chId = editChannelId.getText().toString().trim();
-                boolean added = service.addAccount(token, chId.isEmpty() ? null : chId, true, false);
-                if (added) {
-                    editNewToken.setText("");
-                    Toast.makeText(this, "Account added successfully!", Toast.LENGTH_SHORT).show();
-                } else {
-                    Toast.makeText(this, "Failed to add account (limit 5 or already exists)", Toast.LENGTH_SHORT).show();
+                DiscordVoiceService.AddAccountResult res = service.addAccount(
+                        token,
+                        chId.isEmpty() ? null : chId,
+                        true,
+                        false
+                );
+                switch (res) {
+                    case SUCCESS:
+                        editNewToken.setText("");
+                        Toast.makeText(this, "Account added successfully!", Toast.LENGTH_SHORT).show();
+                        break;
+                    case ALREADY_EXISTS:
+                        Toast.makeText(this, "This account token is already added!", Toast.LENGTH_LONG).show();
+                        break;
+                    case LIMIT_REACHED:
+                        Toast.makeText(this, "Limit reached: Maximum 5 accounts allowed!", Toast.LENGTH_LONG).show();
+                        break;
+                    case EMPTY_TOKEN:
+                        Toast.makeText(this, "Token is invalid or empty!", Toast.LENGTH_SHORT).show();
+                        break;
                 }
+            } else {
+                Toast.makeText(this, "Service is initializing, please retry...", Toast.LENGTH_SHORT).show();
             }
         });
 
@@ -253,7 +269,7 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
             }
         });
 
-        // Quick Toggles
+        // Quick Toggles for Selected Accounts
         btnToggleMuteSelected.setOnClickListener(v -> {
             if (service != null && !selectedAccountIds.isEmpty()) {
                 service.toggleMute(new ArrayList<>(selectedAccountIds));
@@ -309,7 +325,6 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
         if (service == null) return;
         List<AccountModel> accounts = service.getAccountsList();
 
-        // Default selection: if empty, select all
         if (selectedAccountIds.isEmpty() && !accounts.isEmpty()) {
             for (AccountModel a : accounts) {
                 selectedAccountIds.add(a.getId());
@@ -318,8 +333,8 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
 
         refreshSelectionViews(accounts);
         refreshAccountsList(accounts);
+        updateSelectedToggleButtons(accounts);
 
-        // Populate logs
         List<String> logs = service.getLogHistory();
         StringBuilder sb = new StringBuilder();
         for (String line : logs) {
@@ -327,6 +342,38 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
         }
         textLogs.setText(sb.toString());
         scrollLogs.post(() -> scrollLogs.fullScroll(View.FOCUS_DOWN));
+    }
+
+    private void updateSelectedToggleButtons(List<AccountModel> accounts) {
+        boolean anyMuted = false;
+        boolean anyDeaf = false;
+        boolean anyCam = false;
+        boolean anyStream = false;
+
+        for (AccountModel a : accounts) {
+            if (selectedAccountIds.contains(a.getId())) {
+                if (a.isMuted()) anyMuted = true;
+                if (a.isDeafened()) anyDeaf = true;
+                if (a.isCameraOn()) anyCam = true;
+                if (a.isStreaming()) anyStream = true;
+            }
+        }
+
+        // Red when muted, normal (gray) when unmuted
+        btnToggleMuteSelected.setBackgroundResource(anyMuted ? R.drawable.btn_red : R.drawable.btn_gray);
+        btnToggleMuteSelected.setText(anyMuted ? "🎙️ MUTED" : "🎙️ MUTE");
+
+        // Red when deafened, normal (gray) when undeaf
+        btnToggleDeafSelected.setBackgroundResource(anyDeaf ? R.drawable.btn_red : R.drawable.btn_gray);
+        btnToggleDeafSelected.setText(anyDeaf ? "🎧 DEAFENED" : "🎧 DEAFEN");
+
+        // Red when cam on, normal (gray) when cam off
+        btnToggleCamSelected.setBackgroundResource(anyCam ? R.drawable.btn_red : R.drawable.btn_gray);
+        btnToggleCamSelected.setText(anyCam ? "📷 CAM ON" : "📷 CAM OFF");
+
+        // Red when stream on, normal (gray) when stream off
+        btnToggleStreamSelected.setBackgroundResource(anyStream ? R.drawable.btn_red : R.drawable.btn_gray);
+        btnToggleStreamSelected.setText(anyStream ? "🖥️ STREAM ON" : "🖥️ STREAM OFF");
     }
 
     private void refreshSelectionViews(List<AccountModel> accounts) {
@@ -340,6 +387,7 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
             empty.setTextSize(11);
             containerSelectionPills.addView(empty);
             textSelectionSummary.setText("Selected: None");
+            updateSelectedToggleButtons(accounts);
             return;
         }
 
@@ -362,22 +410,28 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
                     selectedAccountIds.remove(acc.getId());
                 }
                 updateSelectionSummaryText();
+                if (service != null) {
+                    updateSelectedToggleButtons(service.getAccountsList());
+                }
             });
             containerSelectionPills.addView(cb);
         }
 
         updateSelectionSummary(selectedNicknames);
+        updateSelectedToggleButtons(accounts);
     }
 
     private void updateSelectionSummaryText() {
         if (service == null) return;
         List<String> selectedNicknames = new ArrayList<>();
-        for (AccountModel a : service.getAccountsList()) {
+        List<AccountModel> accounts = service.getAccountsList();
+        for (AccountModel a : accounts) {
             if (selectedAccountIds.contains(a.getId())) {
                 selectedNicknames.add(a.getNickname());
             }
         }
         updateSelectionSummary(selectedNicknames);
+        updateSelectedToggleButtons(accounts);
     }
 
     private void updateSelectionSummary(List<String> names) {
@@ -454,22 +508,29 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
             txtSub.setPadding(0, 4, 0, 8);
             card.addView(txtSub);
 
-            // Row 3: Action buttons
+            // Row 3: Action buttons (Red when active, normal/gray when inactive)
             LinearLayout actionsRow = new LinearLayout(this);
             actionsRow.setOrientation(LinearLayout.HORIZONTAL);
 
             Button btnMute = createSmallButton("🎙️", v -> {
                 if (service != null) service.toggleMute(Collections.singletonList(acc.getId()));
             });
+            btnMute.setBackgroundResource(acc.isMuted() ? R.drawable.btn_red : R.drawable.btn_gray);
+
             Button btnDeaf = createSmallButton("🎧", v -> {
                 if (service != null) service.toggleDeaf(Collections.singletonList(acc.getId()));
             });
+            btnDeaf.setBackgroundResource(acc.isDeafened() ? R.drawable.btn_red : R.drawable.btn_gray);
+
             Button btnCam = createSmallButton("📷", v -> {
                 if (service != null) service.toggleCamera(Collections.singletonList(acc.getId()));
             });
+            btnCam.setBackgroundResource(acc.isCameraOn() ? R.drawable.btn_red : R.drawable.btn_gray);
+
             Button btnStream = createSmallButton("🖥️", v -> {
                 if (service != null) service.toggleStream(Collections.singletonList(acc.getId()));
             });
+            btnStream.setBackgroundResource(acc.isStreaming() ? R.drawable.btn_red : R.drawable.btn_gray);
 
             actionsRow.addView(btnMute);
             actionsRow.addView(btnDeaf);
@@ -547,6 +608,7 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
         runOnUiThread(() -> {
             refreshSelectionViews(accounts);
             refreshAccountsList(accounts);
+            updateSelectedToggleButtons(accounts);
         });
     }
 
