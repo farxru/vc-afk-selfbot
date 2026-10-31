@@ -92,6 +92,8 @@ public class DiscordGatewayClient {
     public void stop() {
         this.isRunning = false;
         this.stayInVc = false;
+        this.targetChannelId = null;
+        this.currentGuildId = null;
         stopHeartbeat();
         stopVoiceWatchdog();
         if (reconnectRunnable != null) {
@@ -120,8 +122,6 @@ public class DiscordGatewayClient {
         account.setStatus("Stopped");
         account.setStreaming(false);
         account.setCameraOn(false);
-        targetChannelId = null;
-        currentGuildId = null;
         notifyUpdate();
         log("[-] Account disconnected & stopped.");
     }
@@ -214,8 +214,8 @@ public class DiscordGatewayClient {
                         log("[Watchdog] Missing from target VC #" + targetChannelId + ". Auto-rejoining...");
                         joinVoiceChannel(currentGuildId, targetChannelId);
                     }
+                    watchdogHandler.postDelayed(this, 15000);
                 }
-                watchdogHandler.postDelayed(this, 15000);
             }
         };
         watchdogHandler.postDelayed(watchdogRunnable, 15000);
@@ -291,11 +291,9 @@ public class DiscordGatewayClient {
                 log("[+] Ready: " + account.getNickname() + " (" + fullTag + ")");
                 notifyUpdate();
 
-                // Auto-join configured target voice channel
-                if (targetChannelId != null && !targetChannelId.isEmpty()) {
+                // Auto-join configured target voice channel ONLY if stayInVc is explicitly enabled
+                if (stayInVc && targetChannelId != null && !targetChannelId.isEmpty()) {
                     joinVoiceChannel(null, targetChannelId);
-                } else if (stayInVc && account.getChannelId() != null) {
-                    sendVoiceStateUpdate(currentGuildId, account.getChannelId(), account.isMuted(), account.isDeafened(), account.isCameraOn());
                 }
             } catch (Exception e) {
                 log("[!] Error parsing READY event: " + e.getMessage());
@@ -337,28 +335,27 @@ public class DiscordGatewayClient {
                         return;
                     }
 
-                    stayInVc = true;
-                    log("[+] In VC #" + chId + (account.isMuted() ? " [Muted]" : "") + (account.isDeafened() ? " [Deaf]" : ""));
-                    notifyUpdate();
-                } else if (stayInVc) {
-                    // Disconnected or kicked from VC
-                    String channelToRejoin = (targetChannelId != null && !targetChannelId.isEmpty()) ? targetChannelId : account.getChannelId();
-                    if (channelToRejoin != null && !channelToRejoin.isEmpty()) {
-                        log("[!] Disconnected from VC. Auto-rejoining in 1s...");
-                        account.setInVc(false);
-                        account.setChannelId(null);
+                    if (stayInVc) {
+                        log("[+] In VC #" + chId + (account.isMuted() ? " [Muted]" : "") + (account.isDeafened() ? " [Deaf]" : ""));
                         notifyUpdate();
-                        if (rejoinRunnable != null) {
-                            mainHandler.removeCallbacks(rejoinRunnable);
-                        }
-                        rejoinRunnable = () -> {
-                            rejoinRunnable = null;
-                            if (stayInVc) {
-                                joinVoiceChannel(currentGuildId, channelToRejoin);
-                            }
-                        };
-                        mainHandler.postDelayed(rejoinRunnable, 1000);
                     }
+                } else if (stayInVc && targetChannelId != null && !targetChannelId.isEmpty()) {
+                    // Disconnected or kicked from VC while stayInVc is explicitly enabled
+                    final String channelToRejoin = targetChannelId;
+                    log("[!] Disconnected from VC. Auto-rejoining in 1s...");
+                    account.setInVc(false);
+                    account.setChannelId(null);
+                    notifyUpdate();
+                    if (rejoinRunnable != null) {
+                        mainHandler.removeCallbacks(rejoinRunnable);
+                    }
+                    rejoinRunnable = () -> {
+                        rejoinRunnable = null;
+                        if (stayInVc && targetChannelId != null) {
+                            joinVoiceChannel(currentGuildId, channelToRejoin);
+                        }
+                    };
+                    mainHandler.postDelayed(rejoinRunnable, 1000);
                 }
             }
         } catch (Exception ignored) {}
@@ -414,6 +411,7 @@ public class DiscordGatewayClient {
 
     public void leaveVoiceChannel() {
         this.stayInVc = false;
+        this.targetChannelId = null;
         stopVoiceWatchdog();
         if (rejoinRunnable != null) {
             mainHandler.removeCallbacks(rejoinRunnable);

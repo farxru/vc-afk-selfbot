@@ -91,6 +91,12 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
         super.onCreate();
         instance = this;
         prefs = getSharedPreferences("discord_vc_bot_prefs", MODE_PRIVATE);
+        boolean botEnabled = prefs.getBoolean("pref_bot_enabled", true);
+        if (!botEnabled) {
+            stopSelf();
+            return;
+        }
+
         notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         createNotificationChannel();
 
@@ -103,6 +109,18 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
         startForeground(NOTIFICATION_ID, buildNotification("Ready", 0, 0));
         loadSavedAccounts();
         startRamMonitor();
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null) {
+            String action = intent.getAction();
+            if ("ACTION_STOP".equals(action)) {
+                stopBotCompletely();
+                return START_NOT_STICKY;
+            }
+        }
+        return START_NOT_STICKY;
     }
 
     public void setUiListener(UiListener listener) {
@@ -169,7 +187,6 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
         }
         prefs.edit().putString("pref_tokens_json", cleanArr.toString()).apply();
 
-        String targetChannel = prefs.getString("pref_channel_id", null);
         boolean autoDeaf = prefs.getBoolean("pref_auto_deaf", true);
         boolean autoMute = prefs.getBoolean("pref_auto_mute", false);
 
@@ -177,7 +194,8 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
             String accId = "acc_" + (accountCounter++);
             DiscordGatewayClient client = new DiscordGatewayClient(accId, t, this);
             clients.put(accId, client);
-            client.start(targetChannel, autoDeaf, autoMute);
+            // Connect in standby (standby = true, targetChannel = null to avoid auto-joining VC on boot)
+            client.start(null, autoDeaf, autoMute);
         }
     }
 
@@ -271,6 +289,9 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
                 }
             }
         }
+        if (prefs != null) {
+            prefs.edit().remove("pref_channel_id").apply();
+        }
         cleanRam("post leaveVc");
     }
 
@@ -360,6 +381,10 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
             ramMonitorRunnable = null;
         }
 
+        if (prefs != null) {
+            prefs.edit().remove("pref_channel_id").putBoolean("pref_bot_enabled", false).apply();
+        }
+
         synchronized (clients) {
             for (DiscordGatewayClient c : clients.values()) {
                 c.stop();
@@ -380,6 +405,12 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
                 stopForeground(true);
             }
         } catch (Exception ignored) {}
+
+        if (notificationManager != null) {
+            try {
+                notificationManager.cancel(NOTIFICATION_ID);
+            } catch (Exception ignored) {}
+        }
 
         stopSelf();
         instance = null;
@@ -448,6 +479,13 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
         );
 
+        Intent stopIntent = new Intent(this, DiscordVoiceService.class);
+        stopIntent.setAction("ACTION_STOP");
+        PendingIntent stopPendingIntent = PendingIntent.getService(
+                this, 1, stopIntent,
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
+        );
+
         String content = "Online: " + online + "/" + clients.size() + " | In VC: " + inVc;
 
         return new NotificationCompat.Builder(this, CHANNEL_ID)
@@ -455,6 +493,7 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
                 .setContentText(content)
                 .setSmallIcon(R.drawable.ic_launcher)
                 .setContentIntent(pendingIntent)
+                .addAction(R.drawable.ic_launcher, "🛑 Stop Bot", stopPendingIntent)
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .build();

@@ -40,6 +40,10 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
     private Button btnTabControl, btnTabAccounts, btnTabLogs;
     private View layoutTabControl, layoutTabAccounts, layoutTabLogs;
 
+    // Master Status & Control Views
+    private TextView textMasterStatus;
+    private Button btnMasterStartStop;
+
     // Control Tab Views
     private LinearLayout containerSelectionPills;
     private TextView textSelectionSummary;
@@ -78,6 +82,7 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
             service = b.getService();
             isBound = true;
             service.setUiListener(MainActivity.this);
+            updateMasterStatusUi(true);
             refreshAllUi();
         }
 
@@ -88,6 +93,7 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
             }
             service = null;
             isBound = false;
+            updateMasterStatusUi(false);
         }
     };
 
@@ -101,12 +107,20 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
         initViews();
         setupTabs();
         setupActions();
-        startServiceAndBind();
+
+        boolean botEnabled = prefs.getBoolean("pref_bot_enabled", true);
+        updateMasterStatusUi(botEnabled);
+        if (botEnabled) {
+            startServiceAndBind();
+        }
         startRamUiTimer();
     }
 
     private void initViews() {
         textHeaderRam = findViewById(R.id.textHeaderRam);
+        textMasterStatus = findViewById(R.id.textMasterStatus);
+        btnMasterStartStop = findViewById(R.id.btnMasterStartStop);
+
         btnTabControl = findViewById(R.id.btnTabControl);
         btnTabAccounts = findViewById(R.id.btnTabAccounts);
         btnTabLogs = findViewById(R.id.btnTabLogs);
@@ -175,6 +189,9 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
     }
 
     private void setupActions() {
+        // Master Bot Toggle
+        btnMasterStartStop.setOnClickListener(v -> toggleMasterBotState());
+
         // Toggle Token Visibility
         btnToggleTokenVisibility.setOnClickListener(v -> {
             isTokenVisible = !isTokenVisible;
@@ -311,6 +328,47 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
         });
     }
 
+    private void toggleMasterBotState() {
+        boolean isRunning = DiscordVoiceService.isRunning() || isBound || (service != null);
+        if (isRunning) {
+            // STOP BOT COMPLETELY
+            prefs.edit().putBoolean("pref_bot_enabled", false).remove("pref_channel_id").apply();
+            if (service != null) {
+                service.stopBotCompletely();
+            }
+            if (isBound) {
+                try {
+                    unbindService(serviceConnection);
+                } catch (Exception ignored) {}
+                isBound = false;
+            }
+            service = null;
+            updateMasterStatusUi(false);
+            Toast.makeText(this, "Bot stopped completely. No auto-rejoining.", Toast.LENGTH_SHORT).show();
+        } else {
+            // START BOT
+            prefs.edit().putBoolean("pref_bot_enabled", true).apply();
+            updateMasterStatusUi(true);
+            startServiceAndBind();
+            Toast.makeText(this, "Starting bot service...", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void updateMasterStatusUi(boolean active) {
+        if (textMasterStatus == null || btnMasterStartStop == null) return;
+        if (active) {
+            textMasterStatus.setText("🟢 BOT ACTIVE");
+            textMasterStatus.setTextColor(Color.parseColor("#23A55A"));
+            btnMasterStartStop.setText("🛑 STOP BOT");
+            btnMasterStartStop.setBackgroundResource(R.drawable.btn_red);
+        } else {
+            textMasterStatus.setText("🔴 BOT STOPPED");
+            textMasterStatus.setTextColor(Color.parseColor("#F23F43"));
+            btnMasterStartStop.setText("▶️ START BOT");
+            btnMasterStartStop.setBackgroundResource(R.drawable.btn_green);
+        }
+    }
+
     private void startServiceAndBind() {
         Intent serviceIntent = new Intent(this, DiscordVoiceService.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -361,11 +419,11 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
 
         // Red when muted, normal (gray) when unmuted
         btnToggleMuteSelected.setBackgroundResource(anyMuted ? R.drawable.btn_red : R.drawable.btn_gray);
-        btnToggleMuteSelected.setText(anyMuted ? "🎙️ MUTED" : "🎙️ MUTE");
+        btnToggleMuteSelected.setText(anyMuted ? "🎙️ MUTED" : "🎙️ UNMUTED");
 
         // Red when deafened, normal (gray) when undeaf
         btnToggleDeafSelected.setBackgroundResource(anyDeaf ? R.drawable.btn_red : R.drawable.btn_gray);
-        btnToggleDeafSelected.setText(anyDeaf ? "🎧 DEAFENED" : "🎧 DEAFEN");
+        btnToggleDeafSelected.setText(anyDeaf ? "🎧 DEAFENED" : "🎧 UNDEAF");
 
         // Red when cam on, normal (gray) when cam off
         btnToggleCamSelected.setBackgroundResource(anyCam ? R.drawable.btn_red : R.drawable.btn_gray);
@@ -512,22 +570,22 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
             LinearLayout actionsRow = new LinearLayout(this);
             actionsRow.setOrientation(LinearLayout.HORIZONTAL);
 
-            Button btnMute = createSmallButton("🎙️", v -> {
+            Button btnMute = createSmallButton(acc.isMuted() ? "🎙️ Muted" : "🎙️ Normal", v -> {
                 if (service != null) service.toggleMute(Collections.singletonList(acc.getId()));
             });
             btnMute.setBackgroundResource(acc.isMuted() ? R.drawable.btn_red : R.drawable.btn_gray);
 
-            Button btnDeaf = createSmallButton("🎧", v -> {
+            Button btnDeaf = createSmallButton(acc.isDeafened() ? "🎧 Deaf" : "🎧 Undeaf", v -> {
                 if (service != null) service.toggleDeaf(Collections.singletonList(acc.getId()));
             });
             btnDeaf.setBackgroundResource(acc.isDeafened() ? R.drawable.btn_red : R.drawable.btn_gray);
 
-            Button btnCam = createSmallButton("📷", v -> {
+            Button btnCam = createSmallButton(acc.isCameraOn() ? "📷 Cam ON" : "📷 Cam OFF", v -> {
                 if (service != null) service.toggleCamera(Collections.singletonList(acc.getId()));
             });
             btnCam.setBackgroundResource(acc.isCameraOn() ? R.drawable.btn_red : R.drawable.btn_gray);
 
-            Button btnStream = createSmallButton("🖥️", v -> {
+            Button btnStream = createSmallButton(acc.isStreaming() ? "🖥️ Live" : "🖥️ Stream", v -> {
                 if (service != null) service.toggleStream(Collections.singletonList(acc.getId()));
             });
             btnStream.setBackgroundResource(acc.isStreaming() ? R.drawable.btn_red : R.drawable.btn_gray);
