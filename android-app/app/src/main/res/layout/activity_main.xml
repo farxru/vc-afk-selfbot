@@ -341,6 +341,17 @@
                         android:textColor="#FFFFFF"
                         android:textSize="12sp" />
                 </LinearLayout>
+
+                <Button
+                    android:id="@+id/btnToggleWatchSelected"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:layout_marginTop="6dp"
+                    android:background="@drawable/btn_gray"
+                    android:text="👁️ WATCH STREAM (SELECTED)"
+                    android:textColor="#FFFFFF"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
             </LinearLayout>
 
             <!-- Memory & RAM Optimizer Card -->

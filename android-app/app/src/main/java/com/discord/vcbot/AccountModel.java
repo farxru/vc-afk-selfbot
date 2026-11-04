@@ -14,6 +14,9 @@ public class AccountModel {
     private boolean isDeafened;
     private boolean isCameraOn;
     private boolean isStreaming;
+    private boolean isWatchingStream;
+    private String watchingStreamKey;
+    private String watchingStreamerName;
 
     public AccountModel(String id, String token) {
         this.id = id;
@@ -29,6 +32,9 @@ public class AccountModel {
         this.isDeafened = true;
         this.isCameraOn = false;
         this.isStreaming = false;
+        this.isWatchingStream = false;
+        this.watchingStreamKey = null;
+        this.watchingStreamerName = null;
     }
 
     public String getId() { return id; }
@@ -67,5 +73,14 @@ public class AccountModel {
 
     public boolean isStreaming() { return isStreaming; }
     public void setStreaming(boolean streaming) { isStreaming = streaming; }
+
+    public boolean isWatchingStream() { return isWatchingStream; }
+    public void setWatchingStream(boolean watchingStream) { isWatchingStream = watchingStream; }
+
+    public String getWatchingStreamKey() { return watchingStreamKey; }
+    public void setWatchingStreamKey(String watchingStreamKey) { this.watchingStreamKey = watchingStreamKey; }
+
+    public String getWatchingStreamerName() { return watchingStreamerName; }
+    public void setWatchingStreamerName(String watchingStreamerName) { this.watchingStreamerName = watchingStreamerName; }
 }
 

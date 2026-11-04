@@ -277,6 +277,7 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
             long delay = i * 250L;
             mainHandler.postDelayed(() -> c.joinVoiceChannel(null, chId), delay);
         }
+        mainHandler.postDelayed(this::syncStreamWatchers, targetClients.size() * 250L + 600L);
         cleanRam("post joinVc");
     }
 
@@ -285,7 +286,16 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
             for (String id : accountIds) {
                 DiscordGatewayClient c = clients.get(id);
                 if (c != null) {
+                    String streamKey = c.getStreamKey();
                     c.leaveVoiceChannel();
+                    // If this client was streaming, stop watching for other accounts
+                    if (streamKey != null) {
+                        for (DiscordGatewayClient other : clients.values()) {
+                            if (other != c && streamKey.equals(other.getAccount().getWatchingStreamKey())) {
+                                other.stopWatchingStream();
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -334,9 +344,68 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
                 DiscordGatewayClient c = clients.get(id);
                 if (c != null) {
                     if (c.getAccount().isStreaming()) {
+                        String streamKey = c.getStreamKey();
                         c.stopScreenShare();
+                        // Stop watching this stream for other accounts
+                        for (DiscordGatewayClient other : clients.values()) {
+                            if (other != c && other.getAccount().isWatchingStream()) {
+                                if (streamKey == null || streamKey.equals(other.getAccount().getWatchingStreamKey())) {
+                                    other.stopWatchingStream();
+                                }
+                            }
+                        }
                     } else {
                         c.startScreenShare();
+                        mainHandler.postDelayed(this::syncStreamWatchers, 300L);
+                    }
+                }
+            }
+        }
+    }
+
+    public void toggleWatch(List<String> accountIds) {
+        synchronized (clients) {
+            for (String id : accountIds) {
+                DiscordGatewayClient c = clients.get(id);
+                if (c != null) {
+                    if (c.getAccount().isWatchingStream()) {
+                        c.stopWatchingStream();
+                    } else {
+                        // Find an active streamer in the same voice channel
+                        String myCh = c.getAccount().getChannelId();
+                        DiscordGatewayClient streamer = null;
+                        for (DiscordGatewayClient other : clients.values()) {
+                            if (other != c && other.getAccount().isStreaming() && myCh != null && myCh.equals(other.getAccount().getChannelId())) {
+                                streamer = other;
+                                break;
+                            }
+                        }
+                        if (streamer != null) {
+                            c.watchStream(streamer.getStreamKey(), streamer.getAccount().getNickname());
+                        } else {
+                            appendLog("[-] Cannot watch: No active stream in channel #" + (myCh != null ? myCh : "?"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public void syncStreamWatchers() {
+        synchronized (clients) {
+            for (DiscordGatewayClient streamer : clients.values()) {
+                if (streamer.getAccount().isStreaming() && streamer.getAccount().isInVc()) {
+                    String streamKey = streamer.getStreamKey();
+                    String streamerName = streamer.getAccount().getNickname();
+                    String streamerCh = streamer.getAccount().getChannelId();
+                    if (streamKey != null && streamerCh != null) {
+                        for (DiscordGatewayClient viewer : clients.values()) {
+                            if (viewer != streamer && viewer.getAccount().isInVc() && streamerCh.equals(viewer.getAccount().getChannelId())) {
+                                if (!viewer.getAccount().isWatchingStream()) {
+                                    viewer.watchStream(streamKey, streamerName);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -426,6 +495,7 @@ public class DiscordVoiceService extends Service implements DiscordGatewayClient
         mainHandler.post(() -> {
             notifyAccountsChanged();
             notifyStats();
+            syncStreamWatchers();
         });
     }
 

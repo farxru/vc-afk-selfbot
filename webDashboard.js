@@ -232,6 +232,9 @@ function createDashboard(botState, actions, port = 3000) {
         <button class="btn btn-gray" id="btnToggleCam">📷 Camera</button>
         <button class="btn btn-gray" id="btnToggleStream">🖥️ Screenshare</button>
       </div>
+      <div style="margin-top: 8px;">
+        <button class="btn btn-gray" id="btnToggleWatch" style="width: 100%;">👁️ Watch Stream (Selected)</button>
+      </div>
     </div>
 
     <!-- RAM Optimizer Card -->
@@ -440,6 +443,12 @@ function createDashboard(botState, actions, port = 3000) {
       apiPost('toggleStream', { accountIds: targetIds });
     });
 
+    document.getElementById('btnToggleWatch').addEventListener('click', () => {
+      const targetIds = Array.from(selectedAccountIds);
+      if (targetIds.length === 0) return alert('Please select at least one account');
+      apiPost('toggleWatch', { accountIds: targetIds });
+    });
+
     // RAM Clean buttons
     const triggerCleanRam = () => apiPost('cleanRam');
     document.getElementById('btnCleanRam').addEventListener('click', triggerCleanRam);
@@ -578,6 +587,7 @@ function createDashboard(botState, actions, port = 3000) {
         const anyDeaf = selectedAccs.some(a => a.voice.isDeafened);
         const anyCam = selectedAccs.some(a => a.voice.isCamOn);
         const anyStream = selectedAccs.some(a => a.voice.isStreaming);
+        const anyWatching = selectedAccs.some(a => a.voice.isWatchingStream);
 
         const btnMute = document.getElementById('btnToggleMute');
         if (btnMute) {
@@ -601,6 +611,12 @@ function createDashboard(botState, actions, port = 3000) {
         if (btnStream) {
           btnStream.className = 'btn ' + (anyStream ? 'btn-red' : 'btn-gray');
           btnStream.textContent = anyStream ? '🖥️ Stream On' : '🖥️ Screenshare';
+        }
+
+        const btnWatch = document.getElementById('btnToggleWatch');
+        if (btnWatch) {
+          btnWatch.className = 'btn ' + (anyWatching ? 'btn-red' : 'btn-gray');
+          btnWatch.textContent = anyWatching ? '👁️ Watching Stream' : '👁️ Watch Stream';
         }
 
         // Render Selection Pills on Control Tab
@@ -665,6 +681,7 @@ function createDashboard(botState, actions, port = 3000) {
             <span class="acc-chip \${acc.voice.isDeafened ? 'acc-chip-active' : ''}">\${acc.voice.isDeafened ? '🎧 Deafened' : '🎧 Undeaf'}</span>
             <span class="acc-chip \${acc.voice.isCamOn ? 'acc-chip-active' : ''}">\${acc.voice.isCamOn ? '📷 Cam ON' : '📷 Cam OFF'}</span>
             <span class="acc-chip \${acc.voice.isStreaming ? 'acc-chip-active' : ''}">\${acc.voice.isStreaming ? '🖥️ Streaming' : '🖥️ No Stream'}</span>
+            <span class="acc-chip \${acc.voice.isWatchingStream ? 'acc-chip-active' : ''}">\${acc.voice.isWatchingStream ? '👁️ Watching: ' + escapeHtml(acc.voice.watchingStreamerName || 'Stream') : '⚪ Not Watching'}</span>
           </div>
 
           <!-- Actions per account (Red when active, normal/gray when inactive) -->
@@ -673,6 +690,7 @@ function createDashboard(botState, actions, port = 3000) {
             <button class="btn \${acc.voice.isDeafened ? 'btn-red' : 'btn-gray'} btn-sm" onclick="apiPost('toggleDeaf', { accountId: '\${acc.id}' })">🎧</button>
             <button class="btn \${acc.voice.isCamOn ? 'btn-red' : 'btn-gray'} btn-sm" onclick="apiPost('toggleCam', { accountId: '\${acc.id}' })">📷</button>
             <button class="btn \${acc.voice.isStreaming ? 'btn-red' : 'btn-gray'} btn-sm" onclick="apiPost('toggleStream', { accountId: '\${acc.id}' })">🖥️</button>
+            <button class="btn \${acc.voice.isWatchingStream ? 'btn-red' : 'btn-gray'} btn-sm" onclick="apiPost('toggleWatch', { accountId: '\${acc.id}' })">👁️</button>
             \${acc.voice.inVc ? \`<button class="btn btn-red btn-sm" onclick="apiPost('leaveVc', { accountId: '\${acc.id}' })">Leave VC</button>\` : ''}
             <button class="btn btn-red btn-sm" style="margin-left: auto;" onclick="if(confirm('Remove account \${escapeHtml(acc.nickname)}?')) apiPost('removeAccount', { accountId: '\${acc.id}' })">🗑️ Remove</button>
           </div>

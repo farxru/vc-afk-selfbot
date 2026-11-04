@@ -132,6 +132,9 @@ class Account {
     this.isStreaming = false;
     this.streamingChannelId = null;
     this.streamingGuildId = null;
+    this.isWatchingStream = false;
+    this.watchingStreamKey = null;
+    this.watchingStreamerName = null;
 
     // Ultra-low memory Discord client with caches set to 0
     this.client = new Client({
@@ -174,7 +177,7 @@ class Account {
       cleanMemory('account ready');
     });
 
-    // Keep stream unpaused whenever Discord Gateway sends stream events
+    // Keep stream unpaused whenever Discord Gateway sends stream events & handle stream delete
     this.client.on('raw', (packet) => {
       if (!packet.t || !packet.d) return;
       if (
@@ -189,6 +192,9 @@ class Account {
             paused: false,
           },
         });
+      }
+      if (packet.t === 'STREAM_DELETE' && packet.d?.stream_key === this.watchingStreamKey) {
+        this.stopWatchingStream();
       }
     });
 
@@ -335,6 +341,7 @@ class Account {
 
   async leaveVoiceChannel() {
     await this.stopScreenShare();
+    await this.stopWatchingStream();
     this.isCameraOn = false;
     this.stayInVc = false;
 
@@ -494,10 +501,55 @@ class Account {
     this.streamingGuildId = null;
   }
 
+  getStreamKey() {
+    const userId = this.client?.user?.id;
+    const channelId = this.streamingChannelId || this.targetChannelId;
+    const guildId = this.streamingGuildId || this.targetGuildId;
+    if (!channelId || !userId) return null;
+    return guildId ? `guild:${guildId}:${channelId}:${userId}` : `call:${channelId}:${userId}`;
+  }
+
+  async watchStream(streamKey, streamerName = null) {
+    if (!streamKey) return;
+    this.isWatchingStream = true;
+    this.watchingStreamKey = streamKey;
+    this.watchingStreamerName = streamerName;
+    try {
+      this.client.ws.broadcast({
+        op: 20,
+        d: {
+          stream_key: streamKey,
+        },
+      });
+      console.log(`[+] [${this.getNickname()}] Now watching stream: ${streamerName || streamKey}`);
+    } catch (err) {
+      console.error(`[-] [${this.getNickname()}] Error watching stream:`, err.message);
+    }
+  }
+
+  async stopWatchingStream() {
+    if (!this.isWatchingStream && !this.watchingStreamKey) return;
+    try {
+      this.client.ws.broadcast({
+        op: 20,
+        d: {
+          stream_key: null,
+        },
+      });
+      console.log(`[-] [${this.getNickname()}] Stopped watching stream`);
+    } catch (_) {}
+    this.isWatchingStream = false;
+    this.watchingStreamKey = null;
+    this.watchingStreamerName = null;
+  }
+
   async destroy() {
     this.stayInVc = false;
     try {
       await this.leaveVoiceChannel();
+    } catch (_) {}
+    try {
+      await this.stopWatchingStream();
     } catch (_) {}
     try {
       this.client.destroy();
@@ -533,6 +585,25 @@ for (const token of initialTokens) {
 }
 
 // Periodic Watchdog: Checks every 15s to keep all accounts in VC
+function syncStreamWatchers() {
+  for (const streamer of accounts.values()) {
+    if (streamer.isStreaming && streamer.targetChannelId) {
+      const streamKey = streamer.getStreamKey();
+      const streamerName = streamer.getNickname();
+      const chId = streamer.targetChannelId;
+      if (streamKey && chId) {
+        for (const viewer of accounts.values()) {
+          if (viewer.id !== streamer.id && viewer.targetChannelId === chId && viewer.status === 'online') {
+            if (!viewer.isWatchingStream || viewer.watchingStreamKey !== streamKey) {
+              viewer.watchStream(streamKey, streamerName);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 setInterval(async () => {
   for (const acc of accounts.values()) {
     if (acc.stayInVc && acc.targetChannelId && acc.client.isReady()) {
@@ -606,6 +677,9 @@ try {
             isDeafened: acc.isSelfDeaf,
             isCamOn: acc.isCameraOn,
             isStreaming: acc.isStreaming,
+            isWatchingStream: Boolean(acc.isWatchingStream),
+            watchingStreamKey: acc.watchingStreamKey,
+            watchingStreamerName: acc.watchingStreamerName,
           },
         });
       }
@@ -702,6 +776,7 @@ try {
             results.push(`${acc.getNickname()}: Error (${err.message})`);
           }
         }
+        setTimeout(() => syncStreamWatchers(), 800);
         cleanMemory('post joinVc');
         return results.join(', ');
       }
@@ -709,7 +784,15 @@ try {
       if (action === 'leaveVc') {
         if (targets.length === 0) throw new Error('No accounts selected');
         for (const acc of targets) {
+          const sKey = acc.getStreamKey();
           await acc.leaveVoiceChannel();
+          if (sKey) {
+            for (const other of accounts.values()) {
+              if (other.id !== acc.id && other.watchingStreamKey === sKey) {
+                await other.stopWatchingStream();
+              }
+            }
+          }
         }
         cleanMemory('post leaveVc');
         return `Left VC for ${targets.length} account(s)`;
@@ -753,7 +836,13 @@ try {
         const newStates = [];
         for (const acc of targets) {
           if (acc.isStreaming) {
+            const streamKey = acc.getStreamKey();
             await acc.stopScreenShare();
+            for (const other of accounts.values()) {
+              if (other.id !== acc.id && other.watchingStreamKey === streamKey) {
+                await other.stopWatchingStream();
+              }
+            }
             newStates.push(`${acc.getNickname()}: Stream Stopped`);
           } else {
             if (!acc.targetChannelId) {
@@ -765,9 +854,34 @@ try {
               (await acc.client.channels.fetch(acc.targetChannelId).catch(() => null));
             if (vc) {
               await acc.startScreenShare(vc);
+              setTimeout(() => syncStreamWatchers(), 300);
               newStates.push(`${acc.getNickname()}: Stream Started`);
             } else {
               newStates.push(`${acc.getNickname()}: VC not found`);
+            }
+          }
+        }
+        return newStates.join(', ');
+      }
+
+      if (action === 'toggleWatch') {
+        if (targets.length === 0) throw new Error('No accounts selected');
+        const newStates = [];
+        for (const acc of targets) {
+          if (acc.isWatchingStream) {
+            await acc.stopWatchingStream();
+            newStates.push(`${acc.getNickname()}: Stopped Watching`);
+          } else {
+            const myCh = acc.targetChannelId;
+            const streamer = Array.from(accounts.values()).find(
+              (s) => s.id !== acc.id && s.isStreaming && myCh && s.targetChannelId === myCh
+            );
+            if (streamer) {
+              const sKey = streamer.getStreamKey();
+              await acc.watchStream(sKey, streamer.getNickname());
+              newStates.push(`${acc.getNickname()}: Watching ${streamer.getNickname()}`);
+            } else {
+              newStates.push(`${acc.getNickname()}: No active stream in channel`);
             }
           }
         }

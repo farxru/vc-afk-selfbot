@@ -111,6 +111,7 @@ public class DiscordGatewayClient {
                 }
                 sendVoiceStateUpdate(null, null, false, false, false);
                 stopScreenShare();
+                stopWatchingStream();
             } catch (Exception ignored) {}
             try {
                 webSocket.close(1000, "Account stopped by user");
@@ -122,6 +123,9 @@ public class DiscordGatewayClient {
         account.setStatus("Stopped");
         account.setStreaming(false);
         account.setCameraOn(false);
+        account.setWatchingStream(false);
+        account.setWatchingStreamKey(null);
+        account.setWatchingStreamerName(null);
         notifyUpdate();
         log("[-] Account disconnected & stopped.");
     }
@@ -300,6 +304,37 @@ public class DiscordGatewayClient {
             }
         } else if ("VOICE_STATE_UPDATE".equals(event)) {
             handleVoiceStateUpdate(d);
+        } else if ("STREAM_CREATE".equals(event)) {
+            handleStreamCreate(d);
+        } else if ("STREAM_DELETE".equals(event)) {
+            handleStreamDelete(d);
+        }
+    }
+
+    private void handleStreamCreate(JSONObject d) {
+        if (d == null) return;
+        String sKey = d.optString("stream_key", null);
+        if (sKey != null && !sKey.isEmpty()) {
+            // Keep own stream unpaused
+            if (account.isStreaming() && botUserId != null && sKey.contains(botUserId)) {
+                try {
+                    JSONObject op22 = new JSONObject();
+                    op22.put("op", 22);
+                    JSONObject d22 = new JSONObject();
+                    d22.put("stream_key", sKey);
+                    d22.put("paused", false);
+                    op22.put("d", d22);
+                    sendJson(op22);
+                } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    private void handleStreamDelete(JSONObject d) {
+        if (d == null) return;
+        String sKey = d.optString("stream_key", null);
+        if (sKey != null && sKey.equals(account.getWatchingStreamKey())) {
+            stopWatchingStream();
         }
     }
 
@@ -418,6 +453,7 @@ public class DiscordGatewayClient {
             rejoinRunnable = null;
         }
         stopScreenShare();
+        stopWatchingStream();
         account.setCameraOn(false);
         account.setInVc(false);
         account.setChannelId(null);
@@ -507,6 +543,55 @@ public class DiscordGatewayClient {
             sendJson(op19);
 
             log("[-] Screenshare stopped");
+            notifyUpdate();
+        } catch (Exception ignored) {}
+    }
+
+    public String getStreamKey() {
+        String chId = account.getChannelId();
+        if (chId == null || botUserId == null) return null;
+        return currentGuildId != null
+                ? "guild:" + currentGuildId + ":" + chId + ":" + botUserId
+                : "call:" + chId + ":" + botUserId;
+    }
+
+    public void watchStream(String streamKey, String streamerName) {
+        if (streamKey == null || streamKey.trim().isEmpty()) return;
+        try {
+            account.setWatchingStream(true);
+            account.setWatchingStreamKey(streamKey.trim());
+            account.setWatchingStreamerName(streamerName != null ? streamerName : "Stream");
+
+            // Opcode 20: STREAM_WATCH
+            JSONObject op20 = new JSONObject();
+            op20.put("op", 20);
+            JSONObject d20 = new JSONObject();
+            d20.put("stream_key", streamKey.trim());
+            op20.put("d", d20);
+            sendJson(op20);
+
+            log("[+] Watching stream: " + (streamerName != null ? streamerName : streamKey));
+            notifyUpdate();
+        } catch (Exception e) {
+            log("[-] Error watching stream: " + e.getMessage());
+        }
+    }
+
+    public void stopWatchingStream() {
+        if (!account.isWatchingStream() && account.getWatchingStreamKey() == null) return;
+        try {
+            // Opcode 20: STREAM_WATCH with stream_key: null
+            JSONObject op20 = new JSONObject();
+            op20.put("op", 20);
+            JSONObject d20 = new JSONObject();
+            d20.put("stream_key", JSONObject.NULL);
+            op20.put("d", d20);
+            sendJson(op20);
+
+            account.setWatchingStream(false);
+            account.setWatchingStreamKey(null);
+            account.setWatchingStreamerName(null);
+            log("[-] Stopped watching stream");
             notifyUpdate();
         } catch (Exception ignored) {}
     }

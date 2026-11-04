@@ -50,7 +50,7 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
     private Button btnSelectAll, btnDeselectAll;
     private EditText editChannelId;
     private Button btnJoinVcSelected, btnLeaveVcSelected;
-    private Button btnToggleMuteSelected, btnToggleDeafSelected, btnToggleCamSelected, btnToggleStreamSelected;
+    private Button btnToggleMuteSelected, btnToggleDeafSelected, btnToggleCamSelected, btnToggleStreamSelected, btnToggleWatchSelected;
     private TextView textRamStatus;
     private Button btnCleanRam;
 
@@ -142,6 +142,7 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
         btnToggleDeafSelected = findViewById(R.id.btnToggleDeafSelected);
         btnToggleCamSelected = findViewById(R.id.btnToggleCamSelected);
         btnToggleStreamSelected = findViewById(R.id.btnToggleStreamSelected);
+        btnToggleWatchSelected = findViewById(R.id.btnToggleWatchSelected);
 
         textRamStatus = findViewById(R.id.textRamStatus);
         btnCleanRam = findViewById(R.id.btnCleanRam);
@@ -311,6 +312,12 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
             }
         });
 
+        btnToggleWatchSelected.setOnClickListener(v -> {
+            if (service != null && !selectedAccountIds.isEmpty()) {
+                service.toggleWatch(new ArrayList<>(selectedAccountIds));
+            }
+        });
+
         // RAM Cleaner Button
         btnCleanRam.setOnClickListener(v -> {
             if (service != null) {
@@ -407,6 +414,7 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
         boolean anyDeaf = false;
         boolean anyCam = false;
         boolean anyStream = false;
+        boolean anyWatching = false;
 
         for (AccountModel a : accounts) {
             if (selectedAccountIds.contains(a.getId())) {
@@ -414,6 +422,7 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
                 if (a.isDeafened()) anyDeaf = true;
                 if (a.isCameraOn()) anyCam = true;
                 if (a.isStreaming()) anyStream = true;
+                if (a.isWatchingStream()) anyWatching = true;
             }
         }
 
@@ -432,6 +441,12 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
         // Red when stream on, normal (gray) when stream off
         btnToggleStreamSelected.setBackgroundResource(anyStream ? R.drawable.btn_red : R.drawable.btn_gray);
         btnToggleStreamSelected.setText(anyStream ? "🖥️ STREAM ON" : "🖥️ STREAM OFF");
+
+        // Red when watching stream, normal (gray) when not watching
+        if (btnToggleWatchSelected != null) {
+            btnToggleWatchSelected.setBackgroundResource(anyWatching ? R.drawable.btn_red : R.drawable.btn_gray);
+            btnToggleWatchSelected.setText(anyWatching ? "👁️ WATCHING STREAM" : "👁️ WATCH STREAM");
+        }
     }
 
     private void refreshSelectionViews(List<AccountModel> accounts) {
@@ -560,6 +575,9 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
             // Row 2: @Username and VC status
             TextView txtSub = new TextView(this);
             String vcTxt = acc.isInVc() ? ("🔊 In VC: #" + acc.getChannelId()) : "⚪ Not in voice";
+            if (acc.isWatchingStream()) {
+                vcTxt += " • 👁️ Watching " + (acc.getWatchingStreamerName() != null ? acc.getWatchingStreamerName() : "Stream");
+            }
             txtSub.setText("@" + acc.getUsername() + " • " + vcTxt);
             txtSub.setTextColor(acc.isInVc() ? Color.parseColor("#23A55A") : Color.parseColor("#949BA4"));
             txtSub.setTextSize(11);
@@ -590,10 +608,16 @@ public class MainActivity extends AppCompatActivity implements DiscordVoiceServi
             });
             btnStream.setBackgroundResource(acc.isStreaming() ? R.drawable.btn_red : R.drawable.btn_gray);
 
+            Button btnWatch = createSmallButton(acc.isWatchingStream() ? "👁️ Watch" : "👁️ Off", v -> {
+                if (service != null) service.toggleWatch(Collections.singletonList(acc.getId()));
+            });
+            btnWatch.setBackgroundResource(acc.isWatchingStream() ? R.drawable.btn_red : R.drawable.btn_gray);
+
             actionsRow.addView(btnMute);
             actionsRow.addView(btnDeaf);
             actionsRow.addView(btnCam);
             actionsRow.addView(btnStream);
+            actionsRow.addView(btnWatch);
 
             if (acc.isInVc()) {
                 Button btnLeave = createSmallButton("Leave", v -> {
