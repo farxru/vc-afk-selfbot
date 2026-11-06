@@ -1,15 +1,26 @@
 package com.discord.vcbot;
 
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.LinearGradient;
+import android.graphics.Paint;
+import android.graphics.Shader;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Base64;
 import android.util.Log;
 
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
+import java.net.URLEncoder;
 import java.util.concurrent.TimeUnit;
 
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
@@ -41,6 +52,10 @@ public class DiscordGatewayClient {
     private Runnable watchdogRunnable;
     private Runnable reconnectRunnable;
     private Runnable rejoinRunnable;
+    private final Handler streamKeepAliveHandler = new Handler(Looper.getMainLooper());
+    private Runnable streamKeepAliveRunnable;
+    private final Handler watchKeepAliveHandler = new Handler(Looper.getMainLooper());
+    private Runnable watchKeepAliveRunnable;
     private boolean isRunning = false;
     private int sequenceNumber = -1;
 
@@ -96,6 +111,8 @@ public class DiscordGatewayClient {
         this.currentGuildId = null;
         stopHeartbeat();
         stopVoiceWatchdog();
+        stopStreamKeepAlive();
+        stopWatchKeepAlive();
         if (reconnectRunnable != null) {
             mainHandler.removeCallbacks(reconnectRunnable);
             reconnectRunnable = null;
@@ -148,6 +165,9 @@ public class DiscordGatewayClient {
         Request request = new Request.Builder()
                 .url(GATEWAY_URL)
                 .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9210 Chrome/134.0.6998.205 Electron/35.3.0 Safari/537.36")
+                .addHeader("Accept-Language", "en-US,en;q=0.9")
+                .addHeader("Cache-Control", "no-cache")
+                .addHeader("Pragma", "no-cache")
                 .build();
 
         webSocket = httpClient.newWebSocket(request, new WebSocketListener() {
@@ -518,6 +538,20 @@ public class DiscordGatewayClient {
             op22.put("d", d22);
             sendJson(op22);
 
+            // Opcode 21: STREAM_PING (streamer keep-alive)
+            JSONObject op21 = new JSONObject();
+            op21.put("op", 21);
+            JSONObject d21 = new JSONObject();
+            d21.put("stream_key", streamKey);
+            op21.put("d", d21);
+            sendJson(op21);
+
+            // Upload initial non-blank visual preview
+            uploadStreamPreview(streamKey);
+
+            // Start 12s keep-alive loop
+            startStreamKeepAlive(streamKey);
+
             log("[+] Screenshare started");
             notifyUpdate();
         } catch (Exception e) {
@@ -526,6 +560,7 @@ public class DiscordGatewayClient {
     }
 
     public void stopScreenShare() {
+        stopStreamKeepAlive();
         if (!account.isStreaming()) return;
         try {
             account.setStreaming(false);
@@ -533,6 +568,15 @@ public class DiscordGatewayClient {
             String streamKey = currentGuildId != null
                     ? "guild:" + currentGuildId + ":" + chId + ":" + botUserId
                     : "call:" + chId + ":" + botUserId;
+
+            // Opcode 22: STREAM_SET_PAUSED (paused: true)
+            JSONObject op22 = new JSONObject();
+            op22.put("op", 22);
+            JSONObject d22 = new JSONObject();
+            d22.put("stream_key", streamKey);
+            d22.put("paused", true);
+            op22.put("d", d22);
+            sendJson(op22);
 
             // Opcode 19: STREAM_DELETE
             JSONObject op19 = new JSONObject();
@@ -545,6 +589,150 @@ public class DiscordGatewayClient {
             log("[-] Screenshare stopped");
             notifyUpdate();
         } catch (Exception ignored) {}
+    }
+
+    private void startStreamKeepAlive(String streamKey) {
+        stopStreamKeepAlive();
+        streamKeepAliveRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (account.isStreaming() && isRunning && streamKey != null) {
+                    try {
+                        JSONObject op22 = new JSONObject();
+                        op22.put("op", 22);
+                        JSONObject d22 = new JSONObject();
+                        d22.put("stream_key", streamKey);
+                        d22.put("paused", false);
+                        op22.put("d", d22);
+                        sendJson(op22);
+
+                        JSONObject op21 = new JSONObject();
+                        op21.put("op", 21);
+                        JSONObject d21 = new JSONObject();
+                        d21.put("stream_key", streamKey);
+                        op21.put("d", d21);
+                        sendJson(op21);
+                    } catch (Exception ignored) {}
+
+                    uploadStreamPreview(streamKey);
+                    streamKeepAliveHandler.postDelayed(this, 12000);
+                }
+            }
+        };
+        streamKeepAliveHandler.postDelayed(streamKeepAliveRunnable, 12000);
+    }
+
+    private void stopStreamKeepAlive() {
+        if (streamKeepAliveRunnable != null) {
+            streamKeepAliveHandler.removeCallbacks(streamKeepAliveRunnable);
+            streamKeepAliveRunnable = null;
+        }
+    }
+
+    public void uploadStreamPreview(String streamKey) {
+        if (streamKey == null || streamKey.isEmpty()) return;
+        new Thread(() -> {
+            try {
+                String base64Thumbnail = createStreamPreviewBase64(account.getNickname(), account.getChannelId());
+                if (base64Thumbnail == null) return;
+
+                JSONObject json = new JSONObject();
+                json.put("thumbnail", base64Thumbnail);
+
+                String encodedStreamKey = URLEncoder.encode(streamKey, "UTF-8");
+                RequestBody body = RequestBody.create(
+                        json.toString(),
+                        MediaType.parse("application/json; charset=utf-8")
+                );
+
+                Request req = new Request.Builder()
+                        .url("https://discord.com/api/v9/streams/" + encodedStreamKey + "/preview")
+                        .addHeader("Authorization", account.getToken())
+                        .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9210 Chrome/134.0.6998.205 Electron/35.3.0 Safari/537.36")
+                        .post(body)
+                        .build();
+
+                try (Response resp = httpClient.newCall(req).execute()) {
+                    // Preview updated
+                }
+            } catch (Exception ignored) {}
+        }).start();
+    }
+
+    public String createStreamPreviewBase64(String title, String channelName) {
+        try {
+            int width = 640;
+            int height = 360;
+            Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565);
+            Canvas canvas = new Canvas(bitmap);
+
+            // Discord dark theme gradient background (#1E1F22 to #2B2D31)
+            Paint bgPaint = new Paint();
+            LinearGradient gradient = new LinearGradient(
+                    0, 0, width, height,
+                    Color.rgb(0x1E, 0x1F, 0x22),
+                    Color.rgb(0x2B, 0x2D, 0x31),
+                    Shader.TileMode.CLAMP
+            );
+            bgPaint.setShader(gradient);
+            canvas.drawRect(0, 0, width, height, bgPaint);
+
+            // Draw central card (#313338)
+            Paint cardPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            cardPaint.setColor(Color.rgb(0x31, 0x33, 0x38));
+            cardPaint.setStyle(Paint.Style.FILL);
+            canvas.drawRoundRect(40, 40, width - 40, height - 40, 16, 16, cardPaint);
+
+            // Draw red "● LIVE" badge
+            Paint liveBadgePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            liveBadgePaint.setColor(Color.rgb(0xED, 0x42, 0x45));
+            liveBadgePaint.setStyle(Paint.Style.FILL);
+            canvas.drawRoundRect(60, 60, 180, 100, 10, 10, liveBadgePaint);
+
+            Paint liveTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            liveTextPaint.setColor(Color.WHITE);
+            liveTextPaint.setTextSize(22);
+            liveTextPaint.setFakeBoldText(true);
+            canvas.drawText("● LIVE", 82, 88, liveTextPaint);
+
+            // Streamer Title Text
+            Paint titlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            titlePaint.setColor(Color.WHITE);
+            titlePaint.setTextSize(32);
+            titlePaint.setFakeBoldText(true);
+            String displayTitle = (title != null && !title.isEmpty()) ? title : "Live Screen Share";
+            if (displayTitle.length() > 24) displayTitle = displayTitle.substring(0, 24) + "...";
+            canvas.drawText(displayTitle, 60, 160, titlePaint);
+
+            // Channel / Subtitle Text
+            Paint subPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            subPaint.setColor(Color.rgb(0x94, 0x9B, 0xA4));
+            subPaint.setTextSize(22);
+            String subText = channelName != null ? "Channel: #" + channelName : "Discord Voice Stream";
+            canvas.drawText(subText, 60, 205, subPaint);
+
+            // Discord 720p 60fps pill badge
+            Paint badgePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            badgePaint.setColor(Color.rgb(0x58, 0x65, 0xF2));
+            badgePaint.setStyle(Paint.Style.FILL);
+            canvas.drawRoundRect(60, 250, 210, 290, 8, 8, badgePaint);
+
+            Paint badgeTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            badgeTextPaint.setColor(Color.WHITE);
+            badgeTextPaint.setTextSize(18);
+            badgeTextPaint.setFakeBoldText(true);
+            canvas.drawText("720p 60FPS", 80, 278, badgeTextPaint);
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 75, baos);
+            byte[] jpegBytes = baos.toByteArray();
+            bitmap.recycle();
+
+            return "data:image/jpeg;base64," + Base64.encodeToString(jpegBytes, Base64.NO_WRAP);
+        } catch (Exception e) {
+            Log.e(TAG, "Error generating stream preview", e);
+            return null;
+        }
     }
 
     public String getStreamKey() {
@@ -570,6 +758,16 @@ public class DiscordGatewayClient {
             op20.put("d", d20);
             sendJson(op20);
 
+            // Opcode 21: Immediate STREAM_PING to register watcher active state
+            JSONObject op21 = new JSONObject();
+            op21.put("op", 21);
+            JSONObject d21 = new JSONObject();
+            d21.put("stream_key", streamKey.trim());
+            op21.put("d", d21);
+            sendJson(op21);
+
+            startWatchKeepAlive(streamKey.trim());
+
             log("[+] Watching stream: " + (streamerName != null ? streamerName : streamKey));
             notifyUpdate();
         } catch (Exception e) {
@@ -578,6 +776,7 @@ public class DiscordGatewayClient {
     }
 
     public void stopWatchingStream() {
+        stopWatchKeepAlive();
         if (!account.isWatchingStream() && account.getWatchingStreamKey() == null) return;
         try {
             // Opcode 20: STREAM_WATCH with stream_key: null
@@ -594,6 +793,35 @@ public class DiscordGatewayClient {
             log("[-] Stopped watching stream");
             notifyUpdate();
         } catch (Exception ignored) {}
+    }
+
+    private void startWatchKeepAlive(String streamKey) {
+        stopWatchKeepAlive();
+        watchKeepAliveRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (account.isWatchingStream() && isRunning && streamKey != null) {
+                    try {
+                        JSONObject op21 = new JSONObject();
+                        op21.put("op", 21);
+                        JSONObject d21 = new JSONObject();
+                        d21.put("stream_key", streamKey);
+                        op21.put("d", d21);
+                        sendJson(op21);
+                    } catch (Exception ignored) {}
+
+                    watchKeepAliveHandler.postDelayed(this, 12000);
+                }
+            }
+        };
+        watchKeepAliveHandler.postDelayed(watchKeepAliveRunnable, 12000);
+    }
+
+    private void stopWatchKeepAlive() {
+        if (watchKeepAliveRunnable != null) {
+            watchKeepAliveHandler.removeCallbacks(watchKeepAliveRunnable);
+            watchKeepAliveRunnable = null;
+        }
     }
 
     private void sendVoiceStateUpdate(String guildId, String channelId, boolean mute, boolean deaf, boolean video) {
@@ -620,12 +848,38 @@ public class DiscordGatewayClient {
             JSONObject props = new JSONObject();
             props.put("os", "Windows");
             props.put("browser", "Discord Client");
-            props.put("device", "Discord Client");
+            props.put("release_channel", "stable");
+            props.put("client_version", "1.0.9210");
+            props.put("os_version", "10.0.19045");
+            props.put("os_arch", "x64");
+            props.put("app_arch", "x64");
+            props.put("system_locale", "en-US");
+            props.put("browser_user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9210 Chrome/134.0.6998.205 Electron/35.3.0 Safari/537.36");
+            props.put("browser_version", "35.3.0");
+            props.put("client_build_number", 455964);
+            props.put("native_build_number", JSONObject.NULL);
+            props.put("client_event_source", JSONObject.NULL);
+
+            JSONObject clientState = new JSONObject();
+            clientState.put("guild_versions", new JSONObject());
+            clientState.put("highest_last_message_id", "0");
+            clientState.put("read_state_version", 0);
+            clientState.put("user_guild_settings_version", -1);
+            clientState.put("user_settings_version", -1);
+
+            JSONObject presence = new JSONObject();
+            presence.put("status", "online");
+            presence.put("since", 0);
+            presence.put("activities", new org.json.JSONArray());
+            presence.put("afk", false);
 
             JSONObject d = new JSONObject();
             d.put("token", account.getToken());
-            d.put("capabilities", 8189);
+            d.put("capabilities", 16381);
             d.put("properties", props);
+            d.put("presence", presence);
+            d.put("compress", false);
+            d.put("client_state", clientState);
 
             JSONObject packet = new JSONObject();
             packet.put("op", 2);

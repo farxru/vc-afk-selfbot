@@ -1,6 +1,24 @@
 const { Client, Options } = require('discord.js-selfbot-v13');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
+
+// Cache non-blank stream preview data URI
+let cachedStreamPreviewBase64 = null;
+function getStreamPreviewDataUri() {
+  if (cachedStreamPreviewBase64) return cachedStreamPreviewBase64;
+  try {
+    const previewPath = path.join(__dirname, 'stream.png');
+    if (fs.existsSync(previewPath)) {
+      const buf = fs.readFileSync(previewPath);
+      cachedStreamPreviewBase64 = 'data:image/jpeg;base64,' + buf.toString('base64');
+      return cachedStreamPreviewBase64;
+    }
+  } catch (err) {
+    console.error('[-] Error reading stream.png:', err.message);
+  }
+  return null;
+}
 
 // Ensure V8 Garbage Collection is accessible in-process
 try {
@@ -135,6 +153,8 @@ class Account {
     this.isWatchingStream = false;
     this.watchingStreamKey = null;
     this.watchingStreamerName = null;
+    this.streamKeepAliveTimer = null;
+    this.watchKeepAliveTimer = null;
 
     // Ultra-low memory Discord client with caches set to 0
     this.client = new Client({
@@ -433,6 +453,7 @@ class Account {
       ? `guild:${guildId}:${channelId}:${userId}`
       : `call:${channelId}:${userId}`;
 
+    // Opcode 18: STREAM_CREATE
     this.client.ws.broadcast({
       op: 18,
       d: {
@@ -443,6 +464,7 @@ class Account {
       },
     });
 
+    // Opcode 22: STREAM_SET_PAUSED (paused: false)
     this.client.ws.broadcast({
       op: 22,
       d: {
@@ -450,9 +472,26 @@ class Account {
         paused: false,
       },
     });
+
+    // Opcode 21: STREAM_PING (streamer keep-alive)
+    this.client.ws.broadcast({
+      op: 21,
+      d: {
+        stream_key: streamKey,
+      },
+    });
+
+    // Upload non-blank stream preview immediately
+    this.uploadPreview(streamKey);
+
+    // Start 12s keepalive loop
+    this.startStreamKeepAlive(streamKey);
+
+    console.log(`[+] [${this.getNickname()}] Started screenshare in #${channel.name || channelId}`);
   }
 
   async stopScreenShare() {
+    this.stopStreamKeepAlive();
     const streamKeys = new Set();
     const userId = this.client.user?.id;
     if (!userId) {
@@ -499,6 +538,71 @@ class Account {
     this.isStreaming = false;
     this.streamingChannelId = null;
     this.streamingGuildId = null;
+    console.log(`[-] [${this.getNickname()}] Stopped screenshare`);
+  }
+
+  startStreamKeepAlive(streamKey) {
+    this.stopStreamKeepAlive();
+    this.streamKeepAliveTimer = setInterval(() => {
+      if (!this.isStreaming || !this.client?.ws) {
+        this.stopStreamKeepAlive();
+        return;
+      }
+      try {
+        this.client.ws.broadcast({
+          op: 22,
+          d: {
+            stream_key: streamKey,
+            paused: false,
+          },
+        });
+        this.client.ws.broadcast({
+          op: 21,
+          d: {
+            stream_key: streamKey,
+          },
+        });
+      } catch (_) {}
+      this.uploadPreview(streamKey);
+    }, 12000);
+  }
+
+  stopStreamKeepAlive() {
+    if (this.streamKeepAliveTimer) {
+      clearInterval(this.streamKeepAliveTimer);
+      this.streamKeepAliveTimer = null;
+    }
+  }
+
+  async uploadPreview(streamKey) {
+    const dataUri = getStreamPreviewDataUri();
+    if (!dataUri || !streamKey) return;
+    try {
+      const encodedKey = encodeURIComponent(streamKey);
+      const url = new URL(`https://discord.com/api/v9/streams/${encodedKey}/preview`);
+      const payload = JSON.stringify({ thumbnail: dataUri });
+      const req = https.request(
+        url,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: this.token,
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(payload),
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9210 Chrome/134.0.6998.205 Electron/35.3.0 Safari/537.36',
+          },
+          timeout: 8000,
+        },
+        (res) => {
+          res.resume();
+        }
+      );
+      req.on('error', () => {});
+      req.on('timeout', () => req.destroy());
+      req.write(payload);
+      req.end();
+    } catch (_) {}
   }
 
   getStreamKey() {
@@ -515,12 +619,23 @@ class Account {
     this.watchingStreamKey = streamKey;
     this.watchingStreamerName = streamerName;
     try {
+      // Opcode 20: STREAM_WATCH
       this.client.ws.broadcast({
         op: 20,
         d: {
           stream_key: streamKey,
         },
       });
+
+      // Opcode 21: STREAM_PING (register viewer active state)
+      this.client.ws.broadcast({
+        op: 21,
+        d: {
+          stream_key: streamKey,
+        },
+      });
+
+      this.startWatchKeepAlive(streamKey);
       console.log(`[+] [${this.getNickname()}] Now watching stream: ${streamerName || streamKey}`);
     } catch (err) {
       console.error(`[-] [${this.getNickname()}] Error watching stream:`, err.message);
@@ -528,6 +643,7 @@ class Account {
   }
 
   async stopWatchingStream() {
+    this.stopWatchKeepAlive();
     if (!this.isWatchingStream && !this.watchingStreamKey) return;
     try {
       this.client.ws.broadcast({
@@ -541,6 +657,31 @@ class Account {
     this.isWatchingStream = false;
     this.watchingStreamKey = null;
     this.watchingStreamerName = null;
+  }
+
+  startWatchKeepAlive(streamKey) {
+    this.stopWatchKeepAlive();
+    this.watchKeepAliveTimer = setInterval(() => {
+      if (!this.isWatchingStream || !this.client?.ws) {
+        this.stopWatchKeepAlive();
+        return;
+      }
+      try {
+        this.client.ws.broadcast({
+          op: 21,
+          d: {
+            stream_key: streamKey,
+          },
+        });
+      } catch (_) {}
+    }, 12000);
+  }
+
+  stopWatchKeepAlive() {
+    if (this.watchKeepAliveTimer) {
+      clearInterval(this.watchKeepAliveTimer);
+      this.watchKeepAliveTimer = null;
+    }
   }
 
   async destroy() {
