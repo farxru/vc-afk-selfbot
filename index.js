@@ -125,7 +125,7 @@ setInterval(() => {
   const heapMb = mem.heapUsed / 1024 / 1024;
   const rssMb = mem.rss / 1024 / 1024;
 
-  if (heapMb >= 28 || rssMb >= 30) {
+  if (heapMb >= 26 || (rssMb >= 60 && heapMb >= 20)) {
     cleanMemory('threshold >= 30MB');
   }
 }, 3000);
@@ -680,30 +680,38 @@ class Account {
     return guildId ? `guild:${guildId}:${channelId}:${userId}` : `call:${channelId}:${userId}`;
   }
 
+  updateWatchPresence(isWatching = this.isWatchingStream, streamerName = this.watchingStreamerName) {
+    try {
+      this.client.ws.broadcast({
+        op: 3,
+        d: {
+          since: 0,
+          activities: isWatching
+            ? [
+                {
+                  name: streamerName ? `${streamerName}'s Stream` : 'Stream',
+                  type: 3, // ActivityType.WATCHING
+                  details: `Watching ${streamerName || 'Stream'}`,
+                  state: 'In Voice Channel',
+                },
+              ]
+            : [],
+          status: 'online',
+          afk: false,
+        },
+      });
+    } catch (_) {}
+  }
+
   async watchStream(streamKey, streamerName = null) {
     if (!streamKey) return;
     this.isWatchingStream = true;
     this.watchingStreamKey = streamKey;
     this.watchingStreamerName = streamerName;
     try {
-      // Opcode 20: STREAM_WATCH
-      this.client.ws.broadcast({
-        op: 20,
-        d: {
-          stream_key: streamKey,
-        },
-      });
-
-      // Opcode 21: STREAM_PING (register viewer active state)
-      this.client.ws.broadcast({
-        op: 21,
-        d: {
-          stream_key: streamKey,
-        },
-      });
-
-      this.startWatchKeepAlive(streamKey);
-      console.log(`[+] [${this.getNickname()}] Now watching stream: ${streamerName || streamKey}`);
+      // Humanized Discord Presence update without sending raw Opcode 20 (which causes voice disconnects)
+      this.updateWatchPresence(true, streamerName);
+      console.log(`[+] [${this.getNickname()}] Audience in VC watching: ${streamerName || streamKey}`);
     } catch (err) {
       console.error(`[-] [${this.getNickname()}] Error watching stream:`, err.message);
     }
@@ -713,12 +721,7 @@ class Account {
     this.stopWatchKeepAlive();
     if (!this.isWatchingStream && !this.watchingStreamKey) return;
     try {
-      this.client.ws.broadcast({
-        op: 20,
-        d: {
-          stream_key: null,
-        },
-      });
+      this.updateWatchPresence(false);
       console.log(`[-] [${this.getNickname()}] Stopped watching stream`);
     } catch (_) {}
     this.isWatchingStream = false;
@@ -728,20 +731,6 @@ class Account {
 
   startWatchKeepAlive(streamKey) {
     this.stopWatchKeepAlive();
-    this.watchKeepAliveTimer = setInterval(() => {
-      if (!this.isWatchingStream || !this.client?.ws) {
-        this.stopWatchKeepAlive();
-        return;
-      }
-      try {
-        this.client.ws.broadcast({
-          op: 21,
-          d: {
-            stream_key: streamKey,
-          },
-        });
-      } catch (_) {}
-    }, 12000);
   }
 
   stopWatchKeepAlive() {

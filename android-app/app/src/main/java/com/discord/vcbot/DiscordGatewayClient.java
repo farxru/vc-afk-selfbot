@@ -529,6 +529,29 @@ public class DiscordGatewayClient {
         } catch (Exception ignored) {}
     }
 
+    public void updateWatchPresence(boolean watching, String streamerName) {
+        try {
+            JSONObject d = new JSONObject();
+            d.put("since", 0);
+            d.put("status", "online");
+            d.put("afk", false);
+            org.json.JSONArray activities = new org.json.JSONArray();
+            if (watching) {
+                JSONObject act = new JSONObject();
+                act.put("name", streamerName != null ? streamerName + "'s Stream" : "Stream");
+                act.put("type", 3); // 3 = ActivityType.WATCHING
+                act.put("details", "Watching " + (streamerName != null ? streamerName : "Stream"));
+                act.put("state", "In Voice Channel");
+                activities.put(act);
+            }
+            d.put("activities", activities);
+            JSONObject packet = new JSONObject();
+            packet.put("op", 3);
+            packet.put("d", d);
+            sendJson(packet);
+        } catch (Exception ignored) {}
+    }
+
     public void startScreenShare() {
         String chId = account.getChannelId();
         if (chId == null) {
@@ -784,28 +807,13 @@ public class DiscordGatewayClient {
             account.setWatchingStreamKey(streamKey.trim());
             account.setWatchingStreamerName(streamerName != null ? streamerName : "Stream");
 
-            // Opcode 20: STREAM_WATCH
-            JSONObject op20 = new JSONObject();
-            op20.put("op", 20);
-            JSONObject d20 = new JSONObject();
-            d20.put("stream_key", streamKey.trim());
-            op20.put("d", d20);
-            sendJson(op20);
+            // Humanized Discord Presence update without sending raw Opcode 20 (which causes voice disconnects)
+            updateWatchPresence(true, streamerName);
 
-            // Opcode 21: Immediate STREAM_PING to register watcher active state
-            JSONObject op21 = new JSONObject();
-            op21.put("op", 21);
-            JSONObject d21 = new JSONObject();
-            d21.put("stream_key", streamKey.trim());
-            op21.put("d", d21);
-            sendJson(op21);
-
-            startWatchKeepAlive(streamKey.trim());
-
-            log("[+] Watching stream: " + (streamerName != null ? streamerName : streamKey));
+            log("[+] Audience in VC watching: " + (streamerName != null ? streamerName : streamKey));
             notifyUpdate();
         } catch (Exception e) {
-            log("[-] Error watching stream: " + e.getMessage());
+            log("[-] Error updating watch state: " + e.getMessage());
         }
     }
 
@@ -813,14 +821,7 @@ public class DiscordGatewayClient {
         stopWatchKeepAlive();
         if (!account.isWatchingStream() && account.getWatchingStreamKey() == null) return;
         try {
-            // Opcode 20: STREAM_WATCH with stream_key: null
-            JSONObject op20 = new JSONObject();
-            op20.put("op", 20);
-            JSONObject d20 = new JSONObject();
-            d20.put("stream_key", JSONObject.NULL);
-            op20.put("d", d20);
-            sendJson(op20);
-
+            updateWatchPresence(false, null);
             account.setWatchingStream(false);
             account.setWatchingStreamKey(null);
             account.setWatchingStreamerName(null);
@@ -831,24 +832,6 @@ public class DiscordGatewayClient {
 
     private void startWatchKeepAlive(String streamKey) {
         stopWatchKeepAlive();
-        watchKeepAliveRunnable = new Runnable() {
-            @Override
-            public void run() {
-                if (account.isWatchingStream() && isRunning && streamKey != null) {
-                    try {
-                        JSONObject op21 = new JSONObject();
-                        op21.put("op", 21);
-                        JSONObject d21 = new JSONObject();
-                        d21.put("stream_key", streamKey);
-                        op21.put("d", d21);
-                        sendJson(op21);
-                    } catch (Exception ignored) {}
-
-                    watchKeepAliveHandler.postDelayed(this, 12000);
-                }
-            }
-        };
-        watchKeepAliveHandler.postDelayed(watchKeepAliveRunnable, 12000);
     }
 
     private void stopWatchKeepAlive() {
