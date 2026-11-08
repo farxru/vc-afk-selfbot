@@ -3,39 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 
-let Streamer = null;
-let playStream = null;
-let prepareStream = null;
-try {
-  const dvs = require('@dank074/discord-video-stream');
-  Streamer = dvs.Streamer;
-  playStream = dvs.playStream;
-  prepareStream = dvs.prepareStream;
-} catch (e) {
-  console.warn('[-] @dank074/discord-video-stream load note:', e.message);
-}
 
-const mp4Path = path.join(__dirname, 'stream.mp4');
-function ensureStreamVideo() {
-  if (fs.existsSync(mp4Path)) return mp4Path;
-  try {
-    const pngPath = path.join(__dirname, 'stream.png');
-    if (fs.existsSync(pngPath)) {
-      const { execSync } = require('child_process');
-      execSync(
-        `ffmpeg -y -loop 1 -i "${pngPath}" -f lavfi -i anullsrc=r=48000:cl=stereo -c:v libx264 -t 2 -r 30 -pix_fmt yuv420p -vf "scale=1280:720" -c:a aac -shortest "${mp4Path}"`,
-        { stdio: 'ignore' }
-      );
-      if (fs.existsSync(mp4Path)) {
-        console.log('[+] Generated 2-second stream.mp4 from stream.png');
-        return mp4Path;
-      }
-    }
-  } catch (err) {
-    console.warn('[!] Note: ffmpeg auto-generation skipped:', err.message);
-  }
-  return null;
-}
 
 // Cache non-blank stream preview data URI
 let cachedStreamPreviewBase64 = null;
@@ -189,9 +157,7 @@ class Account {
     this.watchingStreamerName = null;
     this.streamKeepAliveTimer = null;
     this.watchKeepAliveTimer = null;
-    this.streamer = null;
-    this.isVideoPlaying = false;
-    this.currentPreparedStream = null;
+
 
     // Ultra-low memory Discord client with caches set to 0
     this.client = new Client({
@@ -503,54 +469,7 @@ class Account {
     } catch (_) {}
   }
 
-  async playVideoLoop(channel) {
-    if (!Streamer || !playStream || !prepareStream) return false;
-    const videoFile = ensureStreamVideo();
-    if (!videoFile) return false;
 
-    try {
-      if (!this.streamer) {
-        this.streamer = new Streamer(this.client);
-      }
-
-      const guildId = channel.guild?.id || null;
-      const channelId = channel.id;
-
-      // Join Voice via WebRTC Streamer
-      await this.streamer.joinVoice(guildId, channelId).catch(() => null);
-
-      // Create Go Live stream connection
-      await this.streamer.createStream().catch(() => null);
-
-      this.isVideoPlaying = true;
-      console.log(`[+] [${this.getNickname()}] Streaming 2-second video into #${channel.name || channelId}`);
-
-      // Continuous loop of the 2-second video
-      const loop = async () => {
-        while (this.isStreaming && this.isVideoPlaying) {
-          try {
-            const prepared = prepareStream(videoFile, {
-              width: 1280,
-              height: 720,
-              frameRate: 30,
-              videoCodec: 'H264',
-            });
-            this.currentPreparedStream = prepared;
-            await playStream(prepared.output, this.streamer, { type: 'go-live' });
-          } catch (e) {
-            if (!this.isStreaming || !this.isVideoPlaying) break;
-            await new Promise((r) => setTimeout(r, 1000));
-          }
-        }
-      };
-
-      loop();
-      return true;
-    } catch (err) {
-      console.warn(`[!] [${this.getNickname()}] WebRTC video stream fallback: ${err.message}`);
-      return false;
-    }
-  }
 
   async startScreenShare(channel) {
     const guildId = channel.guild?.id || null;
@@ -616,26 +535,11 @@ class Account {
     // Start 12s keepalive loop
     this.startStreamKeepAlive(streamKey);
 
-    // Start WebRTC 2-sec video stream loop
-    this.playVideoLoop(channel);
-
     console.log(`[+] [${this.getNickname()}] Started screenshare in #${channel.name || channelId}`);
   }
 
   async stopScreenShare() {
     this.stopStreamKeepAlive();
-    this.isVideoPlaying = false;
-    if (this.currentPreparedStream) {
-      try {
-        this.currentPreparedStream.controller?.abort();
-      } catch (_) {}
-      this.currentPreparedStream = null;
-    }
-    if (this.streamer) {
-      try {
-        this.streamer.stopStream();
-      } catch (_) {}
-    }
 
     const streamKeys = new Set();
     const userId = this.client.user?.id;
