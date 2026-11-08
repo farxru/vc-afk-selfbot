@@ -506,6 +506,29 @@ public class DiscordGatewayClient {
         notifyUpdate();
     }
 
+    public void updatePresence(boolean streaming) {
+        try {
+            JSONObject d = new JSONObject();
+            d.put("since", 0);
+            d.put("status", "online");
+            d.put("afk", false);
+            org.json.JSONArray activities = new org.json.JSONArray();
+            if (streaming) {
+                JSONObject act = new JSONObject();
+                act.put("name", "Screen Share");
+                act.put("type", 0);
+                act.put("details", "Streaming Desktop (720p 60fps)");
+                act.put("state", "Live in Voice Channel");
+                activities.put(act);
+            }
+            d.put("activities", activities);
+            JSONObject packet = new JSONObject();
+            packet.put("op", 3);
+            packet.put("d", d);
+            sendJson(packet);
+        } catch (Exception ignored) {}
+    }
+
     public void startScreenShare() {
         String chId = account.getChannelId();
         if (chId == null) {
@@ -517,6 +540,9 @@ public class DiscordGatewayClient {
             String streamKey = currentGuildId != null
                     ? "guild:" + currentGuildId + ":" + chId + ":" + botUserId
                     : "call:" + chId + ":" + botUserId;
+
+            // Opcode 4: Update voice state with self_stream: true
+            sendVoiceStateUpdate(currentGuildId, chId, account.isMuted(), account.isDeafened(), account.isCameraOn(), true);
 
             // Opcode 18: STREAM_CREATE
             JSONObject op18 = new JSONObject();
@@ -545,6 +571,9 @@ public class DiscordGatewayClient {
             d21.put("stream_key", streamKey);
             op21.put("d", d21);
             sendJson(op21);
+
+            // Humanized Rich Presence activity
+            updatePresence(true);
 
             // Upload initial non-blank visual preview
             uploadStreamPreview(streamKey);
@@ -585,6 +614,11 @@ public class DiscordGatewayClient {
             d19.put("stream_key", streamKey);
             op19.put("d", d19);
             sendJson(op19);
+
+            // Reset self_stream to false on Opcode 4
+            sendVoiceStateUpdate(currentGuildId, chId, account.isMuted(), account.isDeafened(), account.isCameraOn(), false);
+
+            updatePresence(false);
 
             log("[-] Screenshare stopped");
             notifyUpdate();
@@ -824,7 +858,7 @@ public class DiscordGatewayClient {
         }
     }
 
-    private void sendVoiceStateUpdate(String guildId, String channelId, boolean mute, boolean deaf, boolean video) {
+    private void sendVoiceStateUpdate(String guildId, String channelId, boolean mute, boolean deaf, boolean video, boolean stream) {
         try {
             JSONObject d = new JSONObject();
             d.put("guild_id", (guildId != null && !guildId.equals("null")) ? guildId : JSONObject.NULL);
@@ -832,6 +866,7 @@ public class DiscordGatewayClient {
             d.put("self_mute", mute);
             d.put("self_deaf", deaf);
             d.put("self_video", video);
+            d.put("self_stream", stream);
             d.put("flags", 2);
 
             JSONObject packet = new JSONObject();
@@ -841,6 +876,10 @@ public class DiscordGatewayClient {
         } catch (Exception e) {
             Log.e(TAG, "Error sending VoiceStateUpdate", e);
         }
+    }
+
+    private void sendVoiceStateUpdate(String guildId, String channelId, boolean mute, boolean deaf, boolean video) {
+        sendVoiceStateUpdate(guildId, channelId, mute, deaf, video, account.isStreaming());
     }
 
     private void sendIdentify() {
